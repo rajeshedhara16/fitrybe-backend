@@ -1,0 +1,367 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
+enum PostAudience {
+  EVERYONE
+  TRYBES
+}
+
+enum TrybeRole {
+  CREATOR
+  CAPTAIN
+  MEMBER
+}
+
+enum ConversationType {
+  DIRECT
+  GROUP
+  TRYBE
+}
+
+enum CliqueStatus {
+  UPCOMING
+  LIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum CliqueRole {
+  HOST
+  PARTICIPANT
+}
+
+enum ParticipantStatus {
+  INVITED
+  JOINED
+  ACTIVE
+  COMPLETED
+  LEFT
+}
+
+enum NotificationType {
+  LIKE
+  COMMENT
+  FOLLOW
+  TRYBE_INVITE
+  CLIQUE_INVITE
+  MESSAGE
+  SYSTEM
+}
+
+model User {
+  id                  String    @id @default(uuid())
+  email               String    @unique
+  passwordHash        String
+  firstName           String?
+  lastName            String?
+  dob                 DateTime?
+  gender              Gender?
+  bio                 String?
+  avatarUrl           String?
+  bannerUrl           String?
+  location            String?
+  activityInterests   String[]  @default([])
+  sportInterests      String[]  @default([])
+  height              Float?
+  weight              Float?
+  targetWeight        Float?
+  fitnessGoal         String?
+  stepTarget          Int?      @default(10000)
+  weeklyDistanceTarget Float?   @default(25.0)
+  caloriesTarget      Int?      @default(500)
+  onboardingCompleted Boolean   @default(false)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  posts                  Post[]
+  comments               Comment[]
+  likes                  Like[]
+  trybeMembers           TrybeMember[]
+  trybesCreated          Trybe[]              @relation("TrybeCreator")
+  following              Follow[]             @relation("FollowerRelation")
+  followers              Follow[]             @relation("FollowingRelation")
+  activities             Activity[]
+  conversationMembers    ConversationMember[]
+  messagesSent           Message[]            @relation("MessageSender")
+  cliqueSessionsCreated  CliqueSession[]      @relation("CliqueCreator")
+  cliqueParticipants     CliqueParticipant[]
+  notificationsReceived  Notification[]       @relation("NotificationRecipient")
+  notificationsTriggered Notification[]       @relation("NotificationActor")
+  goals                  UserGoal[]
+  achievements           UserAchievement[]
+  subscription           Subscription?
+}
+
+model Follow {
+  id          String   @id @default(uuid())
+  follower    User     @relation("FollowerRelation", fields: [followerId], references: [id], onDelete: Cascade)
+  followerId  String
+  following   User     @relation("FollowingRelation", fields: [followingId], references: [id], onDelete: Cascade)
+  followingId String
+  createdAt   DateTime @default(now())
+
+  @@unique([followerId, followingId])
+  @@index([followingId])
+}
+
+model Activity {
+  id            String    @id @default(uuid())
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId        String
+  title         String
+  type          String    @default("Run") // Run, Ride, Hike, Walk, Workout
+  duration      Int       // in seconds
+  distance      Float     // in meters
+  calories      Int       @default(0)
+  avgPace       Float?    // min/km or speed
+  maxSpeed      Float?    // km/h or m/s
+  elevationGain Float?    @default(0)
+  routeData     Json?     // Array of lat/lng/elevation track points
+  startTime     DateTime  @default(now())
+  endTime       DateTime?
+  isPublic      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  posts Post[]
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Post {
+  id          String       @id @default(uuid())
+  author      User         @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  authorId    String
+  caption     String
+  type        String       @default("Update")
+  audience    PostAudience @default(EVERYONE)
+  locationTag String?
+  imageUrls   String[]     @default([])
+  activity    Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  activityId  String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  likes    Like[]
+  comments Comment[]
+
+  @@index([authorId])
+  @@index([createdAt])
+}
+
+model Like {
+  id        String   @id @default(uuid())
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  createdAt DateTime @default(now())
+
+  @@unique([postId, userId])
+  @@index([postId])
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId    String
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  authorId  String
+  text      String
+  createdAt DateTime @default(now())
+
+  @@index([postId])
+}
+
+model Trybe {
+  id                String   @id @default(uuid())
+  name              String
+  description       String?
+  imageUrl          String?
+  isPublic          Boolean  @default(true)
+  category          String?
+  location          String?
+  activityInterests String[] @default([])
+  creator           User     @relation("TrybeCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  creatorId         String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  members       TrybeMember[]
+  conversations Conversation[]
+
+  @@index([creatorId])
+}
+
+model TrybeMember {
+  id       String    @id @default(uuid())
+  trybe    Trybe     @relation(fields: [trybeId], references: [id], onDelete: Cascade)
+  trybeId  String
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId   String
+  role     TrybeRole @default(MEMBER)
+  joinedAt DateTime  @default(now())
+
+  @@unique([trybeId, userId])
+  @@index([userId])
+}
+
+model Conversation {
+  id        String           @id @default(uuid())
+  type      ConversationType @default(DIRECT)
+  name      String?
+  trybe     Trybe?           @relation(fields: [trybeId], references: [id], onDelete: Cascade)
+  trybeId   String?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  members  ConversationMember[]
+  messages Message[]
+
+  @@index([trybeId])
+}
+
+model ConversationMember {
+  id             String       @id @default(uuid())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId         String
+  lastReadAt     DateTime?
+  joinedAt       DateTime     @default(now())
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId String
+  sender         User         @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  senderId       String
+  text           String
+  mediaUrl       String?
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId])
+  @@index([createdAt])
+}
+
+model CliqueSession {
+  id              String       @id @default(uuid())
+  title           String
+  description     String?
+  activityType    String       @default("Run")
+  creator         User         @relation("CliqueCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  creatorId       String
+  status          CliqueStatus @default(UPCOMING)
+  scheduledAt     DateTime     @default(now())
+  startedAt       DateTime?
+  endedAt         DateTime?
+  targetDistance  Float?
+  targetDuration  Int?
+  meetingLocation String?
+  routeData       Json?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  participants CliqueParticipant[]
+
+  @@index([creatorId])
+  @@index([status])
+}
+
+model CliqueParticipant {
+  id              String            @id @default(uuid())
+  session         CliqueSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId       String
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId          String
+  role            CliqueRole        @default(PARTICIPANT)
+  status          ParticipantStatus @default(JOINED)
+  currentLat      Float?
+  currentLng      Float?
+  currentDistance Float?
+  currentPace     Float?
+  joinedAt        DateTime          @default(now())
+
+  @@unique([sessionId, userId])
+  @@index([userId])
+}
+
+model Notification {
+  id          String           @id @default(uuid())
+  recipient   User             @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  recipientId String
+  actor       User?            @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actorId     String?
+  type        NotificationType
+  title       String
+  body        String
+  entityId    String?
+  isRead      Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+
+  @@index([recipientId])
+  @@index([createdAt])
+}
+
+model UserGoal {
+  id             String   @id @default(uuid())
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId         String
+  activity       String   @default("Running")
+  metric         String   @default("Distance")
+  targetValue    Float    @default(50.0)
+  unit           String   @default("Miles")
+  frequency      String   @default("Weekly")
+  period         String   @default("WEEKLY") // DAILY, WEEKLY, MONTHLY
+  targetSteps    Int?     @default(10000)
+  targetDistance Float?   @default(25.0)
+  targetCalories Int?     @default(500)
+  targetWorkouts Int?     @default(4)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model UserAchievement {
+  id            String   @id @default(uuid())
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId        String
+  achievementId String
+  unlockedAt    DateTime @default(now())
+
+  @@unique([userId, achievementId])
+  @@index([userId])
+}
+
+model Subscription {
+  id         String   @id @default(uuid())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     String   @unique
+  plan       String   @default("MONTHLY") // MONTHLY, ANNUAL, TRIAL
+  status     String   @default("ACTIVE")  // ACTIVE, CANCELLED, EXPIRED
+  startDate  DateTime @default(now())
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId])
+}
