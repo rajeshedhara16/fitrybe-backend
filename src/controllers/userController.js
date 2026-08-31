@@ -2,6 +2,7 @@ const prisma = require('../config/prisma');
 const AppError = require('../utils/AppError');
 const { serializeUser } = require('../utils/serializers');
 const { publicUrlFor } = require('../middleware/upload');
+const { createNotification } = require('../utils/notify');
 
 async function getUserById(req, res) {
   const user = await prisma.user.findUnique({ where: { id: req.params.userId } });
@@ -125,14 +126,12 @@ async function followUser(req, res) {
   });
 
   // Trigger notification
-  await prisma.notification.create({
-    data: {
-      recipientId: targetId,
-      actorId: req.userId,
-      type: 'FOLLOW',
-      title: 'New Follower',
-      body: 'started following you.',
-    },
+  await createNotification({
+    recipientId: targetId,
+    actorId: req.userId,
+    type: 'FOLLOW',
+    title: 'New Follower',
+    body: 'started following you.',
   });
 
   res.status(201).json({ following: true });

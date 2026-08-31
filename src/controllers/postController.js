@@ -1,6 +1,7 @@
 const prisma = require('../config/prisma');
 const AppError = require('../utils/AppError');
 const { publicUrlFor } = require('../middleware/upload');
+const { createNotification } = require('../utils/notify');
 
 const POST_INCLUDE = {
   author: {
@@ -108,15 +109,13 @@ async function likePost(req, res) {
 
   // Create notification if not liking own post
   if (post.authorId !== req.userId) {
-    await prisma.notification.create({
-      data: {
-        recipientId: post.authorId,
-        actorId: req.userId,
-        type: 'LIKE',
-        title: 'New Like',
-        body: 'liked your post.',
-        entityId: post.id,
-      },
+    await createNotification({
+      recipientId: post.authorId,
+      actorId: req.userId,
+      type: 'LIKE',
+      title: 'New Like',
+      body: 'liked your post.',
+      entityId: post.id,
     });
   }
 
@@ -160,15 +159,13 @@ async function createComment(req, res) {
 
   // Create notification if not commenting on own post
   if (post.authorId !== req.userId) {
-    await prisma.notification.create({
-      data: {
-        recipientId: post.authorId,
-        actorId: req.userId,
-        type: 'COMMENT',
-        title: 'New Comment',
-        body: `commented: "${req.body.text.substring(0, 40)}"`,
-        entityId: post.id,
-      },
+    await createNotification({
+      recipientId: post.authorId,
+      actorId: req.userId,
+      type: 'COMMENT',
+      title: 'New Comment',
+      body: `commented: "${req.body.text.substring(0, 40)}"`,
+      entityId: post.id,
     });
   }
 

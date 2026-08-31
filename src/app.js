@@ -23,10 +23,34 @@ const subscriptionRoutes = require('./routes/subscriptionRoutes');
 
 const app = express();
 
-app.use(helmet());
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+);
+
 app.use(
   cors({
-    origin: env.corsOrigins.length ? env.corsOrigins : true,
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps, curl, etc.)
+      if (!origin) return callback(null, true);
+
+      // Allow all localhost and 127.0.0.1 origins for local Flutter Web development
+      if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+        return callback(null, true);
+      }
+
+      // Check explicitly configured CORS origins
+      if (env.corsOrigins.length) {
+        if (env.corsOrigins.includes(origin)) {
+          return callback(null, true);
+        }
+        return callback(new Error(`Not allowed by CORS: ${origin}`));
+      }
+
+      // Default fallback: allow
+      return callback(null, true);
+    },
     credentials: true,
   })
 );

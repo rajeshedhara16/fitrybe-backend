@@ -294,6 +294,9 @@ model CliqueParticipant {
   userId          String
   role            CliqueRole        @default(PARTICIPANT)
   status          ParticipantStatus @default(JOINED)
+  // Lobby readiness, orthogonal to `status`: a JOINED member toggles this
+  // while waiting for the host to start.
+  isReady         Boolean           @default(false)
   currentLat      Float?
   currentLng      Float?
   currentDistance Float?

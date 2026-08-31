@@ -2,8 +2,12 @@ const { Server } = require('socket.io');
 const { verifyAccessToken } = require('../utils/jwt');
 const env = require('../config/env');
 
+/// Holds the running Socket.IO server so controllers can push authoritative
+/// updates after a REST mutation (see `emitToClique` / `emitToUser`).
+let io = null;
+
 function initSocketServer(httpServer) {
-  const io = new Server(httpServer, {
+  io = new Server(httpServer, {
     cors: {
       origin: env.corsOrigins.length ? env.corsOrigins : '*',
     },
@@ -76,11 +80,6 @@ function initSocketServer(httpServer) {
       });
     });
 
-    socket.on('clique:status_change', (data) => {
-      // data: { sessionId, status }
-      io.to(`clique:${data.sessionId}`).emit('clique:status_updated', data);
-    });
-
     socket.on('disconnect', () => {
       // Cleanup on disconnect
     });
@@ -89,4 +88,20 @@ function initSocketServer(httpServer) {
   return io;
 }
 
-module.exports = { initSocketServer };
+/**
+ * Broadcasts the authoritative lobby/session state to everyone watching a
+ * clique session. Emitted from the controllers after a join, invite, ready
+ * toggle, leave, or status change so no client has to guess.
+ */
+function emitToClique(sessionId, event, payload) {
+  if (!io) return;
+  io.to(`clique:${sessionId}`).emit(event, payload);
+}
+
+/** Pushes an event to every device a given user has connected. */
+function emitToUser(userId, event, payload) {
+  if (!io) return;
+  io.to(`user:${userId}`).emit(event, payload);
+}
+
+module.exports = { initSocketServer, emitToClique, emitToUser };

@@ -1,6 +1,7 @@
 const prisma = require('../config/prisma');
 const AppError = require('../utils/AppError');
 const { publicUrlFor } = require('../middleware/upload');
+const { createNotification } = require('../utils/notify');
 
 const TRYBE_INCLUDE = {
   creator: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
@@ -245,15 +246,13 @@ async function inviteToTrybe(req, res) {
     return res.json({ invited: false, alreadyMember: true });
   }
 
-  await prisma.notification.create({
-    data: {
-      recipientId: userId,
-      actorId: req.userId,
-      type: 'TRYBE_INVITE',
-      title: trybe.name,
-      body: `invited you to join "${trybe.name}".`,
-      entityId: trybe.id,
-    },
+  await createNotification({
+    recipientId: userId,
+    actorId: req.userId,
+    type: 'TRYBE_INVITE',
+    title: trybe.name,
+    body: `invited you to join "${trybe.name}".`,
+    entityId: trybe.id,
   });
 
   res.status(201).json({ invited: true });
