@@ -24,7 +24,7 @@ async function register(req, res) {
   });
 
   const accessToken = signAccessToken(user.id);
-  const refreshToken = signRefreshToken(user.id);
+  const refreshToken = signRefreshToken(user.id, user.tokenVersion);
 
   res.status(201).json({ user: serializeUser(user), accessToken, refreshToken });
 }
@@ -43,7 +43,7 @@ async function login(req, res) {
   }
 
   const accessToken = signAccessToken(user.id);
-  const refreshToken = signRefreshToken(user.id);
+  const refreshToken = signRefreshToken(user.id, user.tokenVersion);
 
   res.json({ user: serializeUser(user), accessToken, refreshToken });
 }
@@ -64,8 +64,14 @@ async function refresh(req, res) {
     throw new AppError(401, 'Invalid or expired refresh token');
   }
 
+  // Anything issued before the last logout or password change is dead, even
+  // though the signature still checks out and the expiry has not passed.
+  if ((payload.ver ?? 0) !== user.tokenVersion) {
+    throw new AppError(401, 'Invalid or expired refresh token');
+  }
+
   const accessToken = signAccessToken(user.id);
-  const newRefreshToken = signRefreshToken(user.id);
+  const newRefreshToken = signRefreshToken(user.id, user.tokenVersion);
 
   res.json({ accessToken, refreshToken: newRefreshToken });
 }
@@ -92,12 +98,31 @@ async function changePassword(req, res) {
   }
 
   const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
-  await prisma.user.update({
+  // Changing the password signs every other device out.
+  const updated = await prisma.user.update({
     where: { id: req.userId },
-    data: { passwordHash },
+    data: { passwordHash, tokenVersion: { increment: 1 } },
   });
 
-  res.json({ success: true, message: 'Password updated successfully' });
+  // Keep the caller signed in on this device with freshly versioned tokens.
+  res.json({
+    success: true,
+    message: 'Password updated successfully',
+    accessToken: signAccessToken(updated.id),
+    refreshToken: signRefreshToken(updated.id, updated.tokenVersion),
+  });
 }
 
-module.exports = { register, login, refresh, me, changePassword };
+/**
+ * Revokes every refresh token this account holds. Access tokens are stateless
+ * and stay valid until they expire, which is why they are short-lived.
+ */
+async function logout(req, res) {
+  await prisma.user.update({
+    where: { id: req.userId },
+    data: { tokenVersion: { increment: 1 } },
+  });
+  res.json({ success: true });
+}
+
+module.exports = { register, login, refresh, me, changePassword, logout };

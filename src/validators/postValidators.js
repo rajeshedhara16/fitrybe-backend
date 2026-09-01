@@ -10,6 +10,13 @@ const createPostSchema = z.object({
   activityId: z.string().uuid().optional(),
 });
 
+// Only the text of a post is editable; images, audience and the linked
+// activity are fixed once published.
+const updatePostSchema = z.object({
+  caption: z.string().trim().max(2200).optional(),
+  locationTag: z.string().trim().max(120).optional(),
+});
+
 const createCommentSchema = z.object({
   text: z.string().trim().min(1).max(1000),
 });
@@ -26,6 +33,7 @@ const paginationSchema = listPostsQuerySchema;
 
 module.exports = {
   createPostSchema,
+  updatePostSchema,
   createCommentSchema,
   listPostsQuerySchema,
   paginationSchema,

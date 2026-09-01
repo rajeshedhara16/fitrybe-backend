@@ -34,11 +34,11 @@ async function getUserById(req, res) {
 
 async function searchUsers(req, res) {
   // Accept `q` as well as `query` so clients can use either spelling.
-  const { query, q, limit = 20, suggested } = req.query;
+  const { query, q, limit, suggested } = req.validatedQuery;
   const term = query || q;
 
   const users = await prisma.user.findMany({
-    take: parseInt(limit, 10),
+    take: limit,
     where: {
       // Never surface the caller to themselves in search or suggestions.
       id: { not: req.userId },
@@ -53,9 +53,7 @@ async function searchUsers(req, res) {
           }
         : {}),
       // "Grow your trybe" wants people the caller does not already follow.
-      ...(suggested === 'true'
-        ? { followers: { none: { followerId: req.userId } } }
-        : {}),
+      ...(suggested ? { followers: { none: { followerId: req.userId } } } : {}),
     },
     select: {
       id: true,

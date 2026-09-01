@@ -1,4 +1,5 @@
 const prisma = require('../config/prisma');
+const AppError = require('../utils/AppError');
 
 async function getSubscriptionStatus(req, res) {
   const userId = req.userId;
@@ -67,6 +68,11 @@ async function subscribe(req, res) {
 
 async function cancelSubscription(req, res) {
   const userId = req.userId;
+
+  const existing = await prisma.subscription.findUnique({ where: { userId } });
+  if (!existing) {
+    throw new AppError(404, 'You do not have an active subscription');
+  }
 
   const subscription = await prisma.subscription.update({
     where: { userId },

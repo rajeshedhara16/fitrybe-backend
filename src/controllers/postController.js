@@ -2,6 +2,7 @@ const prisma = require('../config/prisma');
 const AppError = require('../utils/AppError');
 const { publicUrlFor } = require('../middleware/upload');
 const { createNotification } = require('../utils/notify');
+const { postVisibilityFilter, canViewPost } = require('../utils/visibility');
 
 const POST_INCLUDE = {
   author: {
@@ -26,9 +27,16 @@ async function listFeed(req, res) {
   const targetAuthor = authorId || userId;
   const takeLimit = parseInt(limit || 20, 10);
 
+  // ANDed rather than merged so the audience rule cannot be displaced by the
+  // caller's own filters.
   const whereClause = {
-    ...(targetAuthor ? { authorId: targetAuthor } : {}),
-    ...(type ? { type } : {}),
+    AND: [
+      await postVisibilityFilter(req.userId),
+      {
+        ...(targetAuthor ? { authorId: targetAuthor } : {}),
+        ...(type ? { type } : {}),
+      },
+    ],
   };
 
   const posts = await prisma.post.findMany({
@@ -77,10 +85,40 @@ async function getPost(req, res) {
       likes: req.userId ? { where: { userId: req.userId }, select: { userId: true } } : false,
     },
   });
-  if (!post) {
+  // Don't reveal that a Trybes-only post exists to someone outside its Trybes.
+  if (!post || !(await canViewPost(req.userId, post))) {
     throw new AppError(404, 'Post not found');
   }
   res.json({ post: serializePost(post, req.userId) });
+}
+
+async function updatePost(req, res) {
+  const post = await prisma.post.findUnique({ where: { id: req.params.postId } });
+  if (!post) {
+    throw new AppError(404, 'Post not found');
+  }
+  if (post.authorId !== req.userId) {
+    throw new AppError(403, 'You can only edit your own posts');
+  }
+
+  const { caption, locationTag } = req.body;
+  if (caption !== undefined && !caption && post.imageUrls.length === 0) {
+    throw new AppError(400, 'A post needs a caption or at least one photo');
+  }
+
+  const updated = await prisma.post.update({
+    where: { id: post.id },
+    data: {
+      ...(caption !== undefined ? { caption } : {}),
+      ...(locationTag !== undefined ? { locationTag } : {}),
+    },
+    include: {
+      ...POST_INCLUDE,
+      likes: { where: { userId: req.userId }, select: { userId: true } },
+    },
+  });
+
+  res.json({ post: serializePost(updated, req.userId) });
 }
 
 async function deletePost(req, res) {
@@ -97,7 +135,7 @@ async function deletePost(req, res) {
 
 async function likePost(req, res) {
   const post = await prisma.post.findUnique({ where: { id: req.params.postId } });
-  if (!post) {
+  if (!post || !(await canViewPost(req.userId, post))) {
     throw new AppError(404, 'Post not found');
   }
 
@@ -130,6 +168,11 @@ async function unlikePost(req, res) {
 }
 
 async function listComments(req, res) {
+  const post = await prisma.post.findUnique({ where: { id: req.params.postId } });
+  if (!post || !(await canViewPost(req.userId, post))) {
+    throw new AppError(404, 'Post not found');
+  }
+
   const comments = await prisma.comment.findMany({
     where: { postId: req.params.postId },
     orderBy: { createdAt: 'asc' },
@@ -142,7 +185,7 @@ async function listComments(req, res) {
 
 async function createComment(req, res) {
   const post = await prisma.post.findUnique({ where: { id: req.params.postId } });
-  if (!post) {
+  if (!post || !(await canViewPost(req.userId, post))) {
     throw new AppError(404, 'Post not found');
   }
 
@@ -176,6 +219,7 @@ module.exports = {
   listFeed,
   createPost,
   getPost,
+  updatePost,
   deletePost,
   likePost,
   unlikePost,

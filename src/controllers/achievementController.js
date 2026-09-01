@@ -13,10 +13,11 @@ async function getUserAchievements(req, res) {
     unlockedMap[item.achievementId] = item.unlockedAt;
   }
 
+  // The badge catalogue (artwork, thresholds, how many exist) lives in the
+  // client's AchievementData, so the server reports only what it actually
+  // knows: which ids this athlete has unlocked, and when.
   res.json({
-    totalCount: 37,
     unlockedCount: unlockedList.length,
-    unlockedRatio: parseFloat((unlockedList.length / 37).toFixed(2)),
     unlockedMap,
     achievements: unlockedList,
   });
@@ -26,6 +27,8 @@ async function unlockAchievement(req, res) {
   const userId = req.userId;
   const { achievementId } = req.body;
 
+  // Re-unlocking is a no-op: the original `unlockedAt` is the date the athlete
+  // earned the badge, and rewriting it made every badge appear earned today.
   const achievement = await prisma.userAchievement.upsert({
     where: {
       userId_achievementId: {
@@ -33,9 +36,7 @@ async function unlockAchievement(req, res) {
         achievementId,
       },
     },
-    update: {
-      unlockedAt: new Date(),
-    },
+    update: {},
     create: {
       userId,
       achievementId,

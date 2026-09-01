@@ -7,10 +7,17 @@ function signAccessToken(userId) {
   });
 }
 
-function signRefreshToken(userId) {
-  return jwt.sign({ sub: userId, type: 'refresh' }, env.jwt.refreshSecret, {
-    expiresIn: env.jwt.refreshExpiresIn,
-  });
+/**
+ * `tokenVersion` is stamped into the token and re-checked on refresh, so
+ * bumping the column on the user revokes every refresh token issued before
+ * that point — which is what makes logout and password change end sessions.
+ */
+function signRefreshToken(userId, tokenVersion = 0) {
+  return jwt.sign(
+    { sub: userId, type: 'refresh', ver: tokenVersion },
+    env.jwt.refreshSecret,
+    { expiresIn: env.jwt.refreshExpiresIn }
+  );
 }
 
 function verifyAccessToken(token) {

@@ -1,5 +1,6 @@
 const prisma = require('../config/prisma');
 const AppError = require('../utils/AppError');
+const { emitToConversation } = require('../sockets');
 
 async function listConversations(req, res) {
   const conversations = await prisma.conversation.findMany({
@@ -108,6 +109,14 @@ async function createConversation(req, res) {
       throw new AppError(400, 'Cannot start a conversation with yourself');
     }
 
+    const recipient = await prisma.user.findUnique({
+      where: { id: recipientId },
+      select: { id: true },
+    });
+    if (!recipient) {
+      throw new AppError(404, 'User not found');
+    }
+
     // Check if direct conversation already exists
     const existing = await prisma.conversation.findFirst({
       where: {
@@ -140,6 +149,16 @@ async function createConversation(req, res) {
 
   // Trybe chat handling
   if (trybeId) {
+    // Opening a Trybe's chat is a member-only action; without this check a
+    // stranger could create the conversation and read everything posted in it.
+    const membership = await prisma.trybeMember.findUnique({
+      where: { trybeId_userId: { trybeId, userId: req.userId } },
+      select: { id: true },
+    });
+    if (!membership) {
+      throw new AppError(403, 'Join this Trybe to open its chat');
+    }
+
     const existing = await prisma.conversation.findFirst({
       where: { trybeId },
     });
@@ -164,7 +183,21 @@ async function createConversation(req, res) {
   }
 
   // Group chat handling
-  const uniqueParticipants = Array.from(new Set([req.userId, ...(participantIds || [])]));
+  const requested = Array.from(new Set(participantIds || [])).filter(
+    (id) => id !== req.userId
+  );
+
+  // Drop ids that are not real accounts, so a typo or a probe cannot seed a
+  // conversation with rows pointing at nothing.
+  const known = await prisma.user.findMany({
+    where: { id: { in: requested } },
+    select: { id: true },
+  });
+  if (known.length !== requested.length) {
+    throw new AppError(400, 'One or more participants could not be found');
+  }
+
+  const uniqueParticipants = [req.userId, ...known.map((u) => u.id)];
 
   const conversation = await prisma.conversation.create({
     data: {
@@ -210,6 +243,12 @@ async function sendMessage(req, res) {
     where: { id: conversationId },
     data: { updatedAt: new Date() },
   });
+
+  // Fan the stored message out to everyone in the room. Broadcasting from
+  // here — rather than letting the sender emit its own copy — means listeners
+  // receive the persisted record, attachments included, and nothing reaches a
+  // room that was not written to the database first.
+  emitToConversation(conversationId, 'chat:message', { message });
 
   res.status(201).json({ message });
 }

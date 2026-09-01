@@ -2,6 +2,30 @@ const prisma = require('../config/prisma');
 const AppError = require('../utils/AppError');
 const { publicUrlFor } = require('../middleware/upload');
 const { createNotification } = require('../utils/notify');
+const { postVisibilityFilter } = require('../utils/visibility');
+
+/** Loads the caller's membership row, or null when they are not a member. */
+function membershipOf(trybeId, userId) {
+  return prisma.trybeMember.findUnique({
+    where: { trybeId_userId: { trybeId, userId } },
+    select: { id: true, role: true },
+  });
+}
+
+/**
+ * Prisma fragment hiding private Trybes from people who have not joined them.
+ * `isPublic` is a declared access control, so it has to be applied on every
+ * read path rather than only in the UI.
+ */
+function trybeVisibilityFilter(viewerId) {
+  return {
+    OR: [
+      { isPublic: true },
+      { creatorId: viewerId },
+      { members: { some: { userId: viewerId } } },
+    ],
+  };
+}
 
 const TRYBE_INCLUDE = {
   creator: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
@@ -10,7 +34,9 @@ const TRYBE_INCLUDE = {
 
 function serializeTrybe(trybe, userId) {
   const { _count, members, ...rest } = trybe;
-  const isMember = Array.isArray(members) ? members.some(m => m.userId === userId) : undefined;
+  const isMember = Array.isArray(members)
+    ? members.some((m) => m.userId === userId)
+    : false;
   return { ...rest, memberCount: _count ? _count.members : 0, isMember };
 }
 
@@ -18,18 +44,26 @@ async function listTrybes(req, res) {
   const { cursor, limit, mine, category, search } = req.validatedQuery || req.query;
   const takeLimit = parseInt(limit || 20, 10);
 
+  // ANDed so the caller's `search` OR cannot displace the visibility rule.
   const whereClause = {
-    ...(mine ? { members: { some: { userId: req.userId } } } : {}),
-    ...(category ? { category: { equals: category, mode: 'insensitive' } } : {}),
-    ...(search
-      ? {
-          OR: [
-            { name: { contains: search, mode: 'insensitive' } },
-            { description: { contains: search, mode: 'insensitive' } },
-            { location: { contains: search, mode: 'insensitive' } },
-          ],
-        }
-      : {}),
+    AND: [
+      trybeVisibilityFilter(req.userId),
+      {
+        ...(mine ? { members: { some: { userId: req.userId } } } : {}),
+        ...(category
+          ? { category: { equals: category, mode: 'insensitive' } }
+          : {}),
+        ...(search
+          ? {
+              OR: [
+                { name: { contains: search, mode: 'insensitive' } },
+                { description: { contains: search, mode: 'insensitive' } },
+                { location: { contains: search, mode: 'insensitive' } },
+              ],
+            }
+          : {}),
+      },
+    ],
   };
 
   const trybes = await prisma.trybe.findMany({
@@ -78,11 +112,32 @@ async function getTrybe(req, res) {
   if (!trybe) {
     throw new AppError(404, 'Trybe not found');
   }
+  // A private Trybe should not even confirm its own existence to outsiders.
+  // `members` is the include above, narrowed to the caller's own row.
+  const callerIsMember = Array.isArray(trybe.members) && trybe.members.length > 0;
+  if (!trybe.isPublic && trybe.creatorId !== req.userId && !callerIsMember) {
+    throw new AppError(404, 'Trybe not found');
+  }
 
   res.json({ trybe: serializeTrybe(trybe, req.userId) });
 }
 
 async function listMembers(req, res) {
+  const trybe = await prisma.trybe.findUnique({
+    where: { id: req.params.trybeId },
+    select: { isPublic: true, creatorId: true },
+  });
+  if (!trybe) {
+    throw new AppError(404, 'Trybe not found');
+  }
+  if (
+    !trybe.isPublic &&
+    trybe.creatorId !== req.userId &&
+    !(await membershipOf(req.params.trybeId, req.userId))
+  ) {
+    throw new AppError(404, 'Trybe not found');
+  }
+
   const members = await prisma.trybeMember.findMany({
     where: { trybeId: req.params.trybeId },
     orderBy: { joinedAt: 'asc' },
@@ -104,6 +159,21 @@ async function listMembers(req, res) {
 
 async function getLeaderboard(req, res) {
   const { trybeId } = req.params;
+
+  const trybe = await prisma.trybe.findUnique({
+    where: { id: trybeId },
+    select: { isPublic: true, creatorId: true },
+  });
+  if (!trybe) {
+    throw new AppError(404, 'Trybe not found');
+  }
+  if (
+    !trybe.isPublic &&
+    trybe.creatorId !== req.userId &&
+    !(await membershipOf(trybeId, req.userId))
+  ) {
+    throw new AppError(404, 'Trybe not found');
+  }
 
   const members = await prisma.trybeMember.findMany({
     where: { trybeId },
@@ -152,6 +222,20 @@ async function getLeaderboard(req, res) {
 async function getTrybePosts(req, res) {
   const { trybeId } = req.params;
 
+  const trybe = await prisma.trybe.findUnique({
+    where: { id: trybeId },
+    select: { isPublic: true, creatorId: true },
+  });
+  if (!trybe) {
+    throw new AppError(404, 'Trybe not found');
+  }
+
+  const isMember =
+    trybe.creatorId === req.userId || !!(await membershipOf(trybeId, req.userId));
+  if (!trybe.isPublic && !isMember) {
+    throw new AppError(404, 'Trybe not found');
+  }
+
   const trybeMembers = await prisma.trybeMember.findMany({
     where: { trybeId },
     select: { userId: true },
@@ -160,8 +244,14 @@ async function getTrybePosts(req, res) {
   const memberUserIds = trybeMembers.map((m) => m.userId);
 
   const posts = await prisma.post.findMany({
+    // Members share this Trybe with every author here, so Trybes-only posts
+    // are visible to them; an onlooker browsing a public Trybe is not, and
+    // the shared visibility filter keeps those posts out of their view.
     where: {
-      authorId: { in: memberUserIds },
+      AND: [
+        { authorId: { in: memberUserIds } },
+        isMember ? {} : await postVisibilityFilter(req.userId),
+      ],
     },
     orderBy: { createdAt: 'desc' },
     take: 20,
@@ -181,6 +271,10 @@ async function joinTrybe(req, res) {
   const trybe = await prisma.trybe.findUnique({ where: { id: req.params.trybeId } });
   if (!trybe) {
     throw new AppError(404, 'Trybe not found');
+  }
+  // Only public Trybes are self-join; a private one has to invite you.
+  if (!trybe.isPublic && trybe.creatorId !== req.userId) {
+    throw new AppError(403, 'This Trybe is invite-only');
   }
 
   await prisma.trybeMember.upsert({
@@ -232,6 +326,13 @@ async function inviteToTrybe(req, res) {
   }
   if (userId === req.userId) {
     throw new AppError(400, 'You are already a member of this Trybe');
+  }
+  // Inviting on behalf of a Trybe you have not joined is not yours to do.
+  if (
+    trybe.creatorId !== req.userId &&
+    !(await membershipOf(trybe.id, req.userId))
+  ) {
+    throw new AppError(403, 'Join this Trybe before inviting others');
   }
 
   const invitee = await prisma.user.findUnique({ where: { id: userId } });

@@ -21,8 +21,18 @@ const updateProfileSchema = z.object({
   onboardingCompleted: z.boolean().optional(),
 });
 
+// `z.coerce.boolean()` would turn the string "false" into true, so parse the
+// literal text instead.
+const looseBoolean = z
+  .union([z.boolean(), z.string()])
+  .transform((v) => (typeof v === 'boolean' ? v : v.trim().toLowerCase() === 'true'));
+
+// Clients send either `query` or `q`. `limit` is bounded here so a junk value
+// can never reach Prisma as `take: NaN`.
 const userSearchSchema = z.object({
-  query: z.string().trim().optional(),
+  query: z.string().trim().max(120).optional(),
+  q: z.string().trim().max(120).optional(),
+  suggested: looseBoolean.optional().default(false),
   limit: z.coerce.number().int().min(1).max(50).default(20),
 });
 

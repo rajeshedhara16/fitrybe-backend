@@ -4,6 +4,7 @@ const { requireAuth } = require('../middleware/auth');
 const { validateBody, validateQuery } = require('../utils/validate');
 const {
   createPostSchema,
+  updatePostSchema,
   createCommentSchema,
   paginationSchema,
 } = require('../validators/postValidators');
@@ -22,6 +23,7 @@ router.post(
   postController.createPost
 );
 router.get('/:postId', postController.getPost);
+router.patch('/:postId', validateBody(updatePostSchema), postController.updatePost);
 router.delete('/:postId', postController.deletePost);
 
 router.post('/:postId/like', postController.likePost);

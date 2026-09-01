@@ -250,6 +250,22 @@ async function updateStatus(req, res) {
     throw new AppError(403, 'Only the host can start or end this activity');
   }
 
+  // A finished session is terminal, and the lifecycle only moves forwards —
+  // otherwise a stray request could revive a completed activity or send a
+  // live one back to the lobby mid-run.
+  const ALLOWED_NEXT = {
+    UPCOMING: ['LIVE', 'CANCELLED'],
+    LIVE: ['COMPLETED', 'CANCELLED'],
+    COMPLETED: [],
+    CANCELLED: [],
+  };
+  if (status !== session.status && !ALLOWED_NEXT[session.status].includes(status)) {
+    throw new AppError(
+      400,
+      `Cannot move this activity from ${session.status} to ${status}`
+    );
+  }
+
   const updatedData = { status };
   if (status === 'LIVE' && !session.startedAt) {
     updatedData.startedAt = new Date();

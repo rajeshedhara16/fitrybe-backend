@@ -4,6 +4,7 @@ const validate = require('../utils/validate');
 const {
   logActivitySchema,
   listActivitiesQuerySchema,
+  analyticsQuerySchema,
 } = require('../validators/activityValidators');
 const {
   logActivity,
@@ -19,7 +20,7 @@ router.use(requireAuth);
 
 router.post('/', validate({ body: logActivitySchema }), logActivity);
 router.get('/', validate({ query: listActivitiesQuerySchema }), listActivities);
-router.get('/analytics', getAnalytics);
+router.get('/analytics', validate({ query: analyticsQuerySchema }), getAnalytics);
 router.get('/:activityId', getActivity);
 router.delete('/:activityId', deleteActivity);
 

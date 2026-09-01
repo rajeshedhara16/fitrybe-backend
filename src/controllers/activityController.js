@@ -73,7 +73,10 @@ async function listActivities(req, res) {
   const { userId, type, cursor, limit } = req.validatedQuery;
 
   const whereClause = {
-    ...(userId ? { userId } : { isPublic: true }),
+    ...(userId ? { userId } : {}),
+    // A private activity is only ever visible to the athlete who logged it,
+    // whether or not the caller asked for a specific user's list.
+    ...(userId === req.userId ? {} : { isPublic: true }),
     ...(type ? { type } : {}),
   };
 
@@ -108,14 +111,23 @@ async function getActivity(req, res) {
     throw new AppError(404, 'Activity not found');
   }
 
+  // Don't confirm that a private activity exists to anyone but its owner.
+  if (!activity.isPublic && activity.userId !== req.userId) {
+    throw new AppError(404, 'Activity not found');
+  }
+
   res.json({ activity });
 }
 
 async function getAnalytics(req, res) {
-  const targetUserId = req.query.userId || req.userId;
+  const { userId } = req.validatedQuery;
+  const targetUserId = userId || req.userId;
+  const isSelf = targetUserId === req.userId;
 
   const userActivities = await prisma.activity.findMany({
-    where: { userId: targetUserId },
+    // Another athlete's totals are built from their public activities only;
+    // your own include everything you logged.
+    where: { userId: targetUserId, ...(isSelf ? {} : { isPublic: true }) },
     orderBy: { createdAt: 'desc' },
   });
 

@@ -23,6 +23,11 @@ const subscriptionRoutes = require('./routes/subscriptionRoutes');
 
 const app = express();
 
+// Railway terminates TLS at its edge, so without this every request carries
+// the proxy's IP and the rate limiters below degrade into one shared global
+// bucket instead of a per-client one.
+app.set('trust proxy', 1);
+
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
@@ -35,21 +40,29 @@ app.use(
       // Allow requests with no origin (like mobile apps, curl, etc.)
       if (!origin) return callback(null, true);
 
-      // Allow all localhost and 127.0.0.1 origins for local Flutter Web development
-      if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+      // Allow localhost during local Flutter Web development only. In
+      // production this would let any page a developer runs locally drive the
+      // deployed API with a user's credentials.
+      if (
+        env.nodeEnv !== 'production' &&
+        /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+      ) {
         return callback(null, true);
       }
 
-      // Check explicitly configured CORS origins
-      if (env.corsOrigins.length) {
-        if (env.corsOrigins.includes(origin)) {
-          return callback(null, true);
-        }
-        return callback(new Error(`Not allowed by CORS: ${origin}`));
+      if (env.corsOrigins.includes(origin)) {
+        return callback(null, true);
       }
 
-      // Default fallback: allow
-      return callback(null, true);
+      // Unlisted browser origin. Outside production an empty allow-list still
+      // means "anything goes" so local tooling keeps working; in production an
+      // unset CORS_ORIGINS denies every cross-origin browser caller rather
+      // than silently trusting all of them.
+      if (env.nodeEnv !== 'production' && !env.corsOrigins.length) {
+        return callback(null, true);
+      }
+
+      return callback(new Error(`Not allowed by CORS: ${origin}`));
     },
     credentials: true,
   })

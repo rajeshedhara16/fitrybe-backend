@@ -23,4 +23,14 @@ const listActivitiesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(20),
 });
 
-module.exports = { logActivitySchema, listActivitiesQuerySchema };
+// `userId` is rejected outright unless it is a real uuid, so a malformed one
+// can never reach Prisma as a `take`/`where` value.
+const analyticsQuerySchema = z.object({
+  userId: z.string().uuid().optional(),
+});
+
+module.exports = {
+  logActivitySchema,
+  listActivitiesQuerySchema,
+  analyticsQuerySchema,
+};

@@ -6,10 +6,17 @@ async function getGoal(req, res) {
     orderBy: { updatedAt: 'desc' },
   });
 
-  // Calculate current progress
+  // Progress so far this week. The window has to start at midnight — using
+  // `setDate` alone kept the current time of day, which silently dropped
+  // everything logged earlier on the first day of the week.
+  //
+  // Weeks run Monday–Sunday to match the client's HealthService, so the goal
+  // ring and the weekly health totals describe the same period.
   const now = new Date();
   const startOfWeek = new Date(now);
-  startOfWeek.setDate(now.getDate() - now.getDay());
+  const daysSinceMonday = (now.getDay() + 6) % 7;
+  startOfWeek.setDate(now.getDate() - daysSinceMonday);
+  startOfWeek.setHours(0, 0, 0, 0);
 
   const activities = await prisma.activity.findMany({
     where: {
@@ -26,6 +33,7 @@ async function getGoal(req, res) {
 
   res.json({
     goal: goal || null,
+    weekStart: startOfWeek,
     progress: {
       distanceKm: currentDistanceKm,
       calories: currentCalories,

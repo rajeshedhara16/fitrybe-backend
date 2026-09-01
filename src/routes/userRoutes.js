@@ -1,8 +1,11 @@
 const { Router } = require('express');
 const userController = require('../controllers/userController');
 const { requireAuth } = require('../middleware/auth');
-const { validateBody } = require('../utils/validate');
-const { updateProfileSchema } = require('../validators/userValidators');
+const { validateBody, validateQuery } = require('../utils/validate');
+const {
+  updateProfileSchema,
+  userSearchSchema,
+} = require('../validators/userValidators');
 const { makeUploader } = require('../middleware/upload');
 
 const router = Router();
@@ -11,7 +14,7 @@ const uploadBanner = makeUploader('banners');
 
 router.use(requireAuth);
 
-router.get('/search', userController.searchUsers);
+router.get('/search', validateQuery(userSearchSchema), userController.searchUsers);
 router.patch('/me', validateBody(updateProfileSchema), userController.updateMe);
 router.post('/me/avatar', uploadAvatar.single('avatar'), userController.uploadAvatar);
 router.post('/me/banner', uploadBanner.single('banner'), userController.uploadBanner);
