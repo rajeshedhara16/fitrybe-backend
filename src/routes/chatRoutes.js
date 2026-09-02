@@ -23,7 +23,7 @@ router.use(requireAuth);
 
 // Attachments are uploaded first, then referenced by URL on the message.
 router.post('/upload', ...uploadChatImage.single('image'), (req, res) => {
-  const uploaded = req.uploads[0];
+  const uploaded = req.uploads?.[0];
   if (!uploaded) {
     throw new AppError(400, 'No file uploaded');
   }

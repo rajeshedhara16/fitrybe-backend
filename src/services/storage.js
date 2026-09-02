@@ -74,23 +74,37 @@ async function putObject(key, body, contentType) {
     throw new AppError(503, STORAGE_UNAVAILABLE_MESSAGE);
   }
 
-  if (env.r2.enabled) {
-    await s3().send(
-      new PutObjectCommand({
-        Bucket: env.r2.bucket,
-        Key: key,
-        Body: body,
-        ContentType: contentType,
-        // Media is immutable — the filename carries a uuid, so a changed image
-        // is always a new key. Let browsers and the CDN keep it for a year.
-        CacheControl: 'public, max-age=31536000, immutable',
-      })
+  try {
+    if (env.r2.enabled) {
+      await s3().send(
+        new PutObjectCommand({
+          Bucket: env.r2.bucket,
+          Key: key,
+          Body: body,
+          ContentType: contentType,
+          // Media is immutable — the filename carries a uuid, so a changed
+          // image is always a new key. Let browsers and the CDN keep it for a
+          // year.
+          CacheControl: 'public, max-age=31536000, immutable',
+        })
+      );
+    } else {
+      const target = path.join(LOCAL_ROOT, key);
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, body);
+    }
+  } catch (err) {
+    // Bad credentials, a wrong bucket name, a token without write permission,
+    // a network blip. The client cannot act on any of that, but "Internal
+    // server error" tells whoever is reading the logs nothing either — so name
+    // the subsystem here and keep the underlying cause server-side.
+    console.error(
+      `[fitrybe] Storage write failed for "${key}" ` +
+        `(bucket=${env.r2.bucket || 'local disk'}): ${err.name}: ${err.message}`
     );
-  } else {
-    const target = path.join(LOCAL_ROOT, key);
-    await fs.mkdir(path.dirname(target), { recursive: true });
-    await fs.writeFile(target, body);
+    throw new AppError(502, 'Could not store the image. Please try again.');
   }
+
   return publicUrlFor(key);
 }
 
