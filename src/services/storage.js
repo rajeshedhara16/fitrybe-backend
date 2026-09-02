@@ -7,8 +7,21 @@ const {
 } = require('@aws-sdk/client-s3');
 
 const env = require('../config/env');
+const AppError = require('../utils/AppError');
+
+const STORAGE_UNAVAILABLE_MESSAGE =
+  'Image uploads are temporarily unavailable. Everything else still works.';
 
 const LOCAL_ROOT = path.join(__dirname, '..', '..', 'uploads');
+
+/**
+ * Whether an upload can be stored somewhere it will still exist tomorrow.
+ *
+ * Development falls back to local disk, which is fine on a machine that keeps
+ * its filesystem. Production has no such substitute — the container is rebuilt
+ * on every deploy — so without a bucket there is nowhere durable to put a file.
+ */
+const isAvailable = () => env.r2.enabled || env.nodeEnv !== 'production';
 
 let client = null;
 function s3() {
@@ -54,6 +67,13 @@ function keyFromUrl(url) {
 
 /** Stores one object and returns its public URL. */
 async function putObject(key, body, contentType) {
+  if (!isAvailable()) {
+    // Belt and braces: routes refuse the upload before it reaches here, but no
+    // code path should be able to write user media to a disk that is about to
+    // be discarded.
+    throw new AppError(503, STORAGE_UNAVAILABLE_MESSAGE);
+  }
+
   if (env.r2.enabled) {
     await s3().send(
       new PutObjectCommand({
@@ -107,4 +127,11 @@ async function deleteByUrls(urls) {
   }
 }
 
-module.exports = { publicUrlFor, keyFromUrl, putObject, deleteByUrls };
+module.exports = {
+  publicUrlFor,
+  keyFromUrl,
+  putObject,
+  deleteByUrls,
+  isAvailable,
+  STORAGE_UNAVAILABLE_MESSAGE,
+};

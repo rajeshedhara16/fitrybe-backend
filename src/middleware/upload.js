@@ -3,14 +3,23 @@ const multer = require('multer');
 const sharp = require('sharp');
 
 const AppError = require('../utils/AppError');
-const { putObject } = require('../services/storage');
+const {
+  putObject,
+  isAvailable,
+  STORAGE_UNAVAILABLE_MESSAGE,
+} = require('../services/storage');
 
-const ALLOWED_MIME = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'image/gif',
-]);
+// What the bytes must actually decode to. The declared Content-Type is only
+// a hint — plenty of HTTP clients (Dart's `MultipartFile.fromPath` among them)
+// send `application/octet-stream` for everything, and a hostile one can claim
+// whatever it likes. The real gate is `sniff` below.
+const ALLOWED_FORMATS = new Set(['jpeg', 'png', 'webp', 'gif']);
+
+// Headers we accept at the multer stage. Anything image-shaped, plus the
+// generic binary type that means "the client did not say".
+const ACCEPTED_MIME_PREFIXES = ['image/'];
+const ACCEPTED_MIME_EXACT = new Set(['application/octet-stream']);
+
 const MAX_FILE_SIZE_BYTES = 8 * 1024 * 1024; // 8MB
 
 /**
@@ -47,7 +56,21 @@ function uniqueKey(subfolder, suffix = '') {
  */
 async function processImage(subfolder, file) {
   const preset = PRESETS[subfolder] || { max: 1600 };
-  const animated = file.mimetype === 'image/gif';
+
+  // Decode the header to find out what this really is. This both validates the
+  // upload and tells us whether it is an animated image, which the declared
+  // Content-Type cannot be trusted to reveal.
+  let meta;
+  try {
+    meta = await sharp(file.buffer).metadata();
+  } catch (err) {
+    throw new AppError(400, 'That file is not a readable image');
+  }
+  if (!ALLOWED_FORMATS.has(meta.format)) {
+    throw new AppError(400, 'Only JPEG, PNG, WEBP, or GIF images are allowed');
+  }
+
+  const animated = (meta.pages || 1) > 1;
 
   const base = () =>
     // `rotate()` bakes in the EXIF orientation so the image still faces the
@@ -105,10 +128,24 @@ const multerInstance = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_FILE_SIZE_BYTES },
   fileFilter: (req, file, cb) => {
-    if (!ALLOWED_MIME.has(file.mimetype)) {
+    // Refuse here rather than after buffering 8MB we have nowhere to put.
+    // Requests carrying no file never reach this, so a caption-only post or a
+    // Trybe without a picture still goes through with storage down.
+    if (!isAvailable()) {
+      cb(new AppError(503, STORAGE_UNAVAILABLE_MESSAGE));
+      return;
+    }
+
+    const mime = (file.mimetype || '').toLowerCase();
+    const plausible =
+      ACCEPTED_MIME_EXACT.has(mime) ||
+      ACCEPTED_MIME_PREFIXES.some((prefix) => mime.startsWith(prefix));
+    if (!plausible) {
       cb(new AppError(400, 'Only JPEG, PNG, WEBP, or GIF images are allowed'));
       return;
     }
+    // Anything that gets past here still has to decode as a real image in
+    // processImage before a single byte is stored.
     cb(null, true);
   },
 });

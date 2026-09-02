@@ -31,12 +31,17 @@ r2.endpoint =
   (r2.accountId ? `https://${r2.accountId}.r2.cloudflarestorage.com` : '');
 
 // Local disk is a development convenience only. In production it is an
-// ephemeral filesystem that loses every upload on redeploy, so refuse to boot
-// rather than quietly storing user photos somewhere they will vanish from.
+// ephemeral filesystem that loses every upload on redeploy, so uploads are
+// refused there rather than written somewhere they will vanish from.
+//
+// This is deliberately not fatal. Storage is one subsystem, and a missing
+// bucket should not be able to take down signing in, the feed, or chat along
+// with it — the API keeps serving and only uploads report themselves broken.
 if (!r2.enabled && nodeEnv === 'production') {
-  throw new Error(
-    'Object storage is not configured. Set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, ' +
-      'R2_SECRET_ACCESS_KEY, R2_BUCKET and R2_PUBLIC_URL.'
+  console.error(
+    '[fitrybe] Object storage is NOT configured — image uploads will be ' +
+      'rejected with 503. Set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, ' +
+      'R2_SECRET_ACCESS_KEY, R2_BUCKET and R2_PUBLIC_URL to enable them.'
   );
 }
 
