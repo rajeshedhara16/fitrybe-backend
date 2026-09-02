@@ -1,7 +1,7 @@
 const prisma = require('../config/prisma');
 const AppError = require('../utils/AppError');
 const { serializeUser } = require('../utils/serializers');
-const { publicUrlFor } = require('../middleware/upload');
+const { deleteByUrls } = require('../services/storage');
 const { createNotification } = require('../utils/notify');
 
 async function getUserById(req, res) {
@@ -83,26 +83,45 @@ async function updateMe(req, res) {
 }
 
 async function uploadAvatar(req, res) {
-  if (!req.file) {
+  const uploaded = req.uploads?.[0];
+  if (!uploaded) {
     throw new AppError(400, 'No file uploaded');
   }
-  const avatarUrl = publicUrlFor('avatars', req.file.filename);
+
+  const previous = await prisma.user.findUnique({
+    where: { id: req.userId },
+    select: { avatarUrl: true },
+  });
+
   const user = await prisma.user.update({
     where: { id: req.userId },
-    data: { avatarUrl },
+    data: { avatarUrl: uploaded.url },
   });
+
+  // The old photo is unreachable now that the row points elsewhere.
+  await deleteByUrls(previous?.avatarUrl);
+
   res.json({ user: serializeUser(user) });
 }
 
 async function uploadBanner(req, res) {
-  if (!req.file) {
+  const uploaded = req.uploads?.[0];
+  if (!uploaded) {
     throw new AppError(400, 'No file uploaded');
   }
-  const bannerUrl = publicUrlFor('banners', req.file.filename);
+
+  const previous = await prisma.user.findUnique({
+    where: { id: req.userId },
+    select: { bannerUrl: true },
+  });
+
   const user = await prisma.user.update({
     where: { id: req.userId },
-    data: { bannerUrl },
+    data: { bannerUrl: uploaded.url },
   });
+
+  await deleteByUrls(previous?.bannerUrl);
+
   res.json({ user: serializeUser(user) });
 }
 

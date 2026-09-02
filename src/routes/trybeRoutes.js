@@ -16,7 +16,7 @@ router.use(requireAuth);
 router.get('/', validateQuery(listTrybesSchema), trybeController.listTrybes);
 router.post(
   '/',
-  uploadTrybeImage.single('image'),
+  ...uploadTrybeImage.single('image'),
   validateBody(createTrybeSchema),
   trybeController.createTrybe
 );

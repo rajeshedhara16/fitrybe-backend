@@ -16,8 +16,8 @@ router.use(requireAuth);
 
 router.get('/search', validateQuery(userSearchSchema), userController.searchUsers);
 router.patch('/me', validateBody(updateProfileSchema), userController.updateMe);
-router.post('/me/avatar', uploadAvatar.single('avatar'), userController.uploadAvatar);
-router.post('/me/banner', uploadBanner.single('banner'), userController.uploadBanner);
+router.post('/me/avatar', ...uploadAvatar.single('avatar'), userController.uploadAvatar);
+router.post('/me/banner', ...uploadBanner.single('banner'), userController.uploadBanner);
 
 router.get('/:userId', userController.getUserById);
 router.get('/:userId/followers', userController.getFollowers);

@@ -1,6 +1,6 @@
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
-const { makeUploader, publicUrlFor } = require('../middleware/upload');
+const { makeUploader } = require('../middleware/upload');
 const AppError = require('../utils/AppError');
 const validate = require('../utils/validate');
 const {
@@ -22,11 +22,12 @@ const uploadChatImage = makeUploader('chat');
 router.use(requireAuth);
 
 // Attachments are uploaded first, then referenced by URL on the message.
-router.post('/upload', uploadChatImage.single('image'), (req, res) => {
-  if (!req.file) {
+router.post('/upload', ...uploadChatImage.single('image'), (req, res) => {
+  const uploaded = req.uploads[0];
+  if (!uploaded) {
     throw new AppError(400, 'No file uploaded');
   }
-  res.status(201).json({ url: publicUrlFor('chat', req.file.filename) });
+  res.status(201).json({ url: uploaded.url });
 });
 
 router.get('/conversations', listConversations);

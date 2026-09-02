@@ -1,6 +1,6 @@
 const prisma = require('../config/prisma');
 const AppError = require('../utils/AppError');
-const { publicUrlFor } = require('../middleware/upload');
+const { deleteByUrls } = require('../services/storage');
 const { createNotification } = require('../utils/notify');
 const { postVisibilityFilter } = require('../utils/visibility');
 
@@ -83,7 +83,7 @@ async function listTrybes(req, res) {
 }
 
 async function createTrybe(req, res) {
-  const imageUrl = req.file ? publicUrlFor('trybes', req.file.filename) : undefined;
+  const imageUrl = req.uploads?.[0]?.url;
 
   const trybe = await prisma.trybe.create({
     data: {
@@ -311,6 +311,7 @@ async function deleteTrybe(req, res) {
     throw new AppError(403, 'Only the creator can delete this Trybe');
   }
   await prisma.trybe.delete({ where: { id: trybe.id } });
+  await deleteByUrls(trybe.imageUrl);
   res.status(204).send();
 }
 

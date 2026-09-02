@@ -18,7 +18,7 @@ router.use(requireAuth);
 router.get('/', validateQuery(paginationSchema), postController.listFeed);
 router.post(
   '/',
-  uploadPostImages.array('images', 6),
+  ...uploadPostImages.array('images', 6),
   validateBody(createPostSchema),
   postController.createPost
 );

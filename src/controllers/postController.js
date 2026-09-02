@@ -1,6 +1,6 @@
 const prisma = require('../config/prisma');
 const AppError = require('../utils/AppError');
-const { publicUrlFor } = require('../middleware/upload');
+const { deleteByUrls } = require('../services/storage');
 const { createNotification } = require('../utils/notify');
 const { postVisibilityFilter, canViewPost } = require('../utils/visibility');
 
@@ -59,7 +59,7 @@ async function listFeed(req, res) {
 }
 
 async function createPost(req, res) {
-  const imageUrls = (req.files || []).map((f) => publicUrlFor('posts', f.filename));
+  const imageUrls = (req.uploads || []).map((u) => u.url);
 
   if (!req.body.caption && imageUrls.length === 0) {
     throw new AppError(400, 'Add a caption or at least one photo to post');
@@ -130,6 +130,11 @@ async function deletePost(req, res) {
     throw new AppError(403, 'You can only delete your own posts');
   }
   await prisma.post.delete({ where: { id: post.id } });
+
+  // Nothing references these once the row is gone, so they would otherwise sit
+  // in the bucket forever being paid for.
+  await deleteByUrls(post.imageUrls);
+
   res.status(204).send();
 }
 
