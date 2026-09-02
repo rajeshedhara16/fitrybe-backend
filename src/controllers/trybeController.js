@@ -3,6 +3,7 @@ const AppError = require('../utils/AppError');
 const { deleteByUrls } = require('../services/storage');
 const { createNotification } = require('../utils/notify');
 const { postVisibilityFilter } = require('../utils/visibility');
+const { serializeActivitySummary } = require('../utils/serializers');
 
 /** Loads the caller's membership row, or null when they are not a member. */
 function membershipOf(trybeId, userId) {
@@ -264,7 +265,13 @@ async function getTrybePosts(req, res) {
     },
   });
 
-  res.json({ posts });
+  // Same trimming as the main feed: a card never needs the full GPS trace.
+  res.json({
+    posts: posts.map((p) => ({
+      ...p,
+      activity: serializeActivitySummary(p.activity),
+    })),
+  });
 }
 
 async function joinTrybe(req, res) {

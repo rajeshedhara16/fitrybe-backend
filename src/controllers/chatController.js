@@ -1,6 +1,23 @@
 const prisma = require('../config/prisma');
 const AppError = require('../utils/AppError');
 const { emitToConversation } = require('../sockets');
+const { deleteByUrls } = require('../services/storage');
+
+const SENDER_SELECT = {
+  select: { id: true, firstName: true, lastName: true, avatarUrl: true },
+};
+
+// A quoted message is rendered inline, so it only needs enough to show a
+// one-line preview — not the full record.
+const REPLY_INCLUDE = {
+  select: {
+    id: true,
+    text: true,
+    mediaUrl: true,
+    senderId: true,
+    sender: SENDER_SELECT,
+  },
+};
 
 async function listConversations(req, res) {
   const conversations = await prisma.conversation.findMany({
@@ -89,9 +106,8 @@ async function getMessages(req, res) {
     ...(cursor && { skip: 1, cursor: { id: cursor } }),
     orderBy: { createdAt: 'desc' },
     include: {
-      sender: {
-        select: { id: true, firstName: true, lastName: true, avatarUrl: true },
-      },
+      sender: SENDER_SELECT,
+      replyTo: REPLY_INCLUDE,
     },
   });
 
@@ -214,7 +230,7 @@ async function createConversation(req, res) {
 
 async function sendMessage(req, res) {
   const { conversationId } = req.params;
-  const { text, mediaUrl } = req.body;
+  const { text, mediaUrl, replyToId } = req.body;
 
   const membership = await prisma.conversationMember.findUnique({
     where: { conversationId_userId: { conversationId, userId: req.userId } },
@@ -224,17 +240,29 @@ async function sendMessage(req, res) {
     throw new AppError(403, 'You are not a member of this conversation');
   }
 
+  // A reply may only quote a message from this same conversation, or it would
+  // leak text out of a thread the sender might not even belong to.
+  if (replyToId) {
+    const quoted = await prisma.message.findUnique({
+      where: { id: replyToId },
+      select: { conversationId: true },
+    });
+    if (!quoted || quoted.conversationId !== conversationId) {
+      throw new AppError(400, 'You can only reply to a message in this chat');
+    }
+  }
+
   const message = await prisma.message.create({
     data: {
       conversationId,
       senderId: req.userId,
       text,
       mediaUrl,
+      replyToId,
     },
     include: {
-      sender: {
-        select: { id: true, firstName: true, lastName: true, avatarUrl: true },
-      },
+      sender: SENDER_SELECT,
+      replyTo: REPLY_INCLUDE,
     },
   });
 
@@ -264,10 +292,51 @@ async function markRead(req, res) {
   res.json({ read: true });
 }
 
+/**
+ * Removes one of the caller's own messages for everyone in the thread. Replies
+ * that quoted it survive — the schema nulls the link rather than cascading.
+ */
+async function deleteMessage(req, res) {
+  const { conversationId, messageId } = req.params;
+
+  // Membership first. Someone outside the thread must not be able to tell a
+  // message apart from one that never existed, so they get 404 either way.
+  // A member who simply is not the sender gets 403, which tells them nothing
+  // they cannot already see.
+  const membership = await prisma.conversationMember.findUnique({
+    where: { conversationId_userId: { conversationId, userId: req.userId } },
+    select: { id: true },
+  });
+  if (!membership) {
+    throw new AppError(404, 'Message not found');
+  }
+
+  const message = await prisma.message.findUnique({ where: { id: messageId } });
+  if (!message || message.conversationId !== conversationId) {
+    throw new AppError(404, 'Message not found');
+  }
+  if (message.senderId !== req.userId) {
+    throw new AppError(403, 'You can only delete your own messages');
+  }
+
+  await prisma.message.delete({ where: { id: messageId } });
+
+  // Nothing points at the attachment any more.
+  await deleteByUrls(message.mediaUrl);
+
+  emitToConversation(conversationId, 'chat:message_deleted', {
+    conversationId,
+    messageId,
+  });
+
+  res.status(204).send();
+}
+
 module.exports = {
   listConversations,
   getMessages,
   createConversation,
   sendMessage,
+  deleteMessage,
   markRead,
 };

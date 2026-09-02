@@ -13,6 +13,7 @@ const {
   getMessages,
   createConversation,
   sendMessage,
+  deleteMessage,
   markRead,
 } = require('../controllers/chatController');
 
@@ -42,6 +43,7 @@ router.post(
   validate({ body: sendMessageSchema }),
   sendMessage
 );
+router.delete('/conversations/:conversationId/messages/:messageId', deleteMessage);
 router.post('/conversations/:conversationId/read', markRead);
 
 module.exports = router;

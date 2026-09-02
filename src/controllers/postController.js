@@ -3,6 +3,7 @@ const AppError = require('../utils/AppError');
 const { deleteByUrls } = require('../services/storage');
 const { createNotification } = require('../utils/notify');
 const { postVisibilityFilter, canViewPost } = require('../utils/visibility');
+const { serializeActivitySummary } = require('../utils/serializers');
 
 const POST_INCLUDE = {
   author: {
@@ -13,9 +14,10 @@ const POST_INCLUDE = {
 };
 
 function serializePost(post, viewerId) {
-  const { _count, likes, ...rest } = post;
+  const { _count, likes, activity, ...rest } = post;
   return {
     ...rest,
+    activity: serializeActivitySummary(activity),
     likeCount: _count ? _count.likes : 0,
     commentCount: _count ? _count.comments : 0,
     likedByMe: Array.isArray(likes) ? likes.some((l) => l.userId === viewerId) : false,

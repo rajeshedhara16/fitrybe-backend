@@ -13,6 +13,8 @@ const sendMessageSchema = z
   .object({
     text: z.string().trim().max(2000).optional().default(''),
     mediaUrl: z.string().trim().max(500).optional(),
+    // The message being quoted, if this is a reply.
+    replyToId: z.string().uuid().optional(),
   })
   .refine((v) => v.text.length > 0 || !!v.mediaUrl, {
     message: 'A message needs text or an attachment',

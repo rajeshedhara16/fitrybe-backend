@@ -259,6 +259,11 @@ model Message {
   senderId       String
   text           String
   mediaUrl       String?
+  // Quoted message. SetNull rather than Cascade so deleting the original does
+  // not take every reply to it down as well — the reply just loses its quote.
+  replyTo        Message?     @relation("MessageReply", fields: [replyToId], references: [id], onDelete: SetNull)
+  replyToId      String?
+  replies        Message[]    @relation("MessageReply")
   createdAt      DateTime     @default(now())
 
   @@index([conversationId])
