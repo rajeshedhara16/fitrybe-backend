@@ -16,7 +16,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "seed": "node prisma/seed.js"
+    "seed": "node prisma/seed.js",
+    "verify:r2": "node scripts/verify_r2.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"
