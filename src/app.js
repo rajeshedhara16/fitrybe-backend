@@ -40,25 +40,16 @@ app.use(
       // Allow requests with no origin (like mobile apps, curl, etc.)
       if (!origin) return callback(null, true);
 
-      // Allow localhost during local Flutter Web development only. In
-      // production this would let any page a developer runs locally drive the
-      // deployed API with a user's credentials.
+      // Allow localhost/127.0.0.1 during Flutter Web development
+      if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+        return callback(null, true);
+      }
+
       if (
-        env.nodeEnv !== 'production' &&
-        /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+        !env.corsOrigins.length ||
+        env.corsOrigins.includes('*') ||
+        env.corsOrigins.includes(origin)
       ) {
-        return callback(null, true);
-      }
-
-      if (env.corsOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-
-      // Unlisted browser origin. Outside production an empty allow-list still
-      // means "anything goes" so local tooling keeps working; in production an
-      // unset CORS_ORIGINS denies every cross-origin browser caller rather
-      // than silently trusting all of them.
-      if (env.nodeEnv !== 'production' && !env.corsOrigins.length) {
         return callback(null, true);
       }
 
