@@ -349,6 +349,9 @@ model UserGoal {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
+  // One goal per period: an athlete can hold a daily, a weekly and a monthly
+  // goal at once, each with its own activity, metric and target.
+  @@unique([userId, period])
   @@index([userId])
 }
 

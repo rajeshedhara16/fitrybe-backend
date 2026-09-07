@@ -1,47 +1,28 @@
 const prisma = require('../config/prisma');
+const AppError = require('../utils/AppError');
 
+const PERIODS = ['DAILY', 'WEEKLY', 'MONTHLY'];
+
+/**
+ * An athlete holds up to three goals — one daily, one weekly, one monthly —
+ * each with its own activity, metric and target.
+ *
+ * Progress and streaks are worked out on the client, which is the only side
+ * that knows the athlete's timezone. A session logged at 1am belongs to that
+ * day where they live, and bucketing it here would put it on the wrong day for
+ * anyone not on UTC.
+ */
 async function getGoal(req, res) {
-  let goal = await prisma.userGoal.findFirst({
+  const goals = await prisma.userGoal.findMany({
     where: { userId: req.userId },
-    orderBy: { updatedAt: 'desc' },
+    orderBy: { period: 'asc' },
   });
-
-  // Progress so far this week. The window has to start at midnight — using
-  // `setDate` alone kept the current time of day, which silently dropped
-  // everything logged earlier on the first day of the week.
-  //
-  // Weeks run Monday–Sunday to match the client's HealthService, so the goal
-  // ring and the weekly health totals describe the same period.
-  const now = new Date();
-  const startOfWeek = new Date(now);
-  const daysSinceMonday = (now.getDay() + 6) % 7;
-  startOfWeek.setDate(now.getDate() - daysSinceMonday);
-  startOfWeek.setHours(0, 0, 0, 0);
-
-  const activities = await prisma.activity.findMany({
-    where: {
-      userId: req.userId,
-      createdAt: { gte: startOfWeek },
-    },
-  });
-
-  const currentDistanceKm = parseFloat(
-    (activities.reduce((acc, a) => acc + (a.distance || 0), 0) / 1000).toFixed(2)
-  );
-  const currentCalories = activities.reduce((acc, a) => acc + (a.calories || 0), 0);
-  const currentWorkouts = activities.length;
 
   res.json({
-    goal: goal || null,
-    weekStart: startOfWeek,
-    progress: {
-      distanceKm: currentDistanceKm,
-      calories: currentCalories,
-      workouts: currentWorkouts,
-      distancePercentage: goal ? Math.min(100, Math.round((currentDistanceKm / (goal.targetDistance || 1)) * 100)) : 0,
-      caloriesPercentage: goal ? Math.min(100, Math.round((currentCalories / (goal.targetCalories || 1)) * 100)) : 0,
-      workoutsPercentage: goal ? Math.min(100, Math.round((currentWorkouts / (goal.targetWorkouts || 1)) * 100)) : 0,
-    },
+    goals,
+    // The weekly goal, kept under its old key so anything still reading a
+    // single `goal` keeps working.
+    goal: goals.find((g) => g.period === 'WEEKLY') || goals[0] || null,
   });
 }
 
@@ -58,6 +39,11 @@ async function updateGoal(req, res) {
     targetCalories,
     targetWorkouts,
   } = req.body;
+
+  const normalisedPeriod = `${period}`.toUpperCase();
+  if (!PERIODS.includes(normalisedPeriod)) {
+    throw new AppError(400, 'A goal must be daily, weekly or monthly');
+  }
 
   let computedTargetDistance = targetDistance;
   let computedTargetCalories = targetCalories;
@@ -78,49 +64,57 @@ async function updateGoal(req, res) {
     }
   }
 
-  const existing = await prisma.userGoal.findFirst({
-    where: { userId: req.userId },
+  // Keyed on the period, so saving a weekly goal never overwrites the daily
+  // one. Previously any save replaced whichever goal happened to exist.
+  const goal = await prisma.userGoal.upsert({
+    where: {
+      userId_period: { userId: req.userId, period: normalisedPeriod },
+    },
+    update: {
+      ...(activity && { activity }),
+      ...(metric && { metric }),
+      ...(targetValue !== undefined && { targetValue: parseFloat(targetValue) }),
+      ...(unit && { unit }),
+      ...(frequency && { frequency }),
+      ...(computedTargetSteps !== undefined && { targetSteps: computedTargetSteps }),
+      ...(computedTargetDistance !== undefined && { targetDistance: computedTargetDistance }),
+      ...(computedTargetCalories !== undefined && { targetCalories: computedTargetCalories }),
+      ...(computedTargetWorkouts !== undefined && { targetWorkouts: computedTargetWorkouts }),
+    },
+    create: {
+      userId: req.userId,
+      period: normalisedPeriod,
+      activity: activity || 'Running',
+      metric: metric || 'Distance',
+      targetValue: targetValue !== undefined ? parseFloat(targetValue) : 50.0,
+      unit: unit || 'Km',
+      frequency: frequency || 'Weekly',
+      targetSteps: computedTargetSteps || 10000,
+      targetDistance: computedTargetDistance || 25.0,
+      targetCalories: computedTargetCalories || 500,
+      targetWorkouts: computedTargetWorkouts || 4,
+    },
   });
 
-  let goal;
-  if (existing) {
-    goal = await prisma.userGoal.update({
-      where: { id: existing.id },
-      data: {
-        period,
-        ...(activity && { activity }),
-        ...(metric && { metric }),
-        ...(targetValue !== undefined && { targetValue: parseFloat(targetValue) }),
-        ...(unit && { unit }),
-        ...(frequency && { frequency }),
-        ...(computedTargetSteps !== undefined && { targetSteps: computedTargetSteps }),
-        ...(computedTargetDistance !== undefined && { targetDistance: computedTargetDistance }),
-        ...(computedTargetCalories !== undefined && { targetCalories: computedTargetCalories }),
-        ...(computedTargetWorkouts !== undefined && { targetWorkouts: computedTargetWorkouts }),
-      },
-    });
-  } else {
-    goal = await prisma.userGoal.create({
-      data: {
-        userId: req.userId,
-        period,
-        activity: activity || 'Running',
-        metric: metric || 'Distance',
-        targetValue: targetValue !== undefined ? parseFloat(targetValue) : 50.0,
-        unit: unit || 'Miles',
-        frequency: frequency || 'Weekly',
-        targetSteps: computedTargetSteps || 10000,
-        targetDistance: computedTargetDistance || 25.0,
-        targetCalories: computedTargetCalories || 500,
-        targetWorkouts: computedTargetWorkouts || 4,
-      },
-    });
+  res.json({ goal });
+}
+
+/** Removes one period's goal, leaving the others in place. */
+async function deleteGoal(req, res) {
+  const period = `${req.params.period}`.toUpperCase();
+  if (!PERIODS.includes(period)) {
+    throw new AppError(400, 'A goal must be daily, weekly or monthly');
   }
 
-  res.json({ goal });
+  await prisma.userGoal.deleteMany({
+    where: { userId: req.userId, period },
+  });
+
+  res.status(204).send();
 }
 
 module.exports = {
   getGoal,
   updateGoal,
+  deleteGoal,
 };

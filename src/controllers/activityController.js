@@ -119,31 +119,95 @@ async function getActivity(req, res) {
   res.json({ activity });
 }
 
+/** How far back the analytics screen's calendars and heatmaps can be scrolled. */
+const ANALYTICS_WINDOW_DAYS = 730;
+
+/** The only fields the analytics screen reads off an activity. */
+const ANALYTICS_SELECT = {
+  id: true,
+  type: true,
+  title: true,
+  duration: true,
+  distance: true,
+  calories: true,
+  avgPace: true,
+  createdAt: true,
+};
+
 async function getAnalytics(req, res) {
   const { userId } = req.validatedQuery;
   const targetUserId = userId || req.userId;
   const isSelf = targetUserId === req.userId;
+  // Another athlete's figures are built from their public activities only;
+  // your own include everything you logged.
+  const scope = { userId: targetUserId, ...(isSelf ? {} : { isPublic: true }) };
 
-  const userActivities = await prisma.activity.findMany({
-    // Another athlete's totals are built from their public activities only;
-    // your own include everything you logged.
-    where: { userId: targetUserId, ...(isSelf ? {} : { isPublic: true }) },
-    orderBy: { createdAt: 'desc' },
-  });
-
-  const totalDistanceMeters = userActivities.reduce((acc, curr) => acc + (curr.distance || 0), 0);
-  const totalDurationSecs = userActivities.reduce((acc, curr) => acc + (curr.duration || 0), 0);
-  const totalCalories = userActivities.reduce((acc, curr) => acc + (curr.calories || 0), 0);
-  const totalWorkouts = userActivities.length;
-
-  // Calculate weekly breakdown (last 7 days)
   const now = new Date();
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-  const recentActivities = userActivities.filter(a => new Date(a.createdAt) >= sevenDaysAgo);
+  const windowStart = new Date(
+    now.getTime() - ANALYTICS_WINDOW_DAYS * 24 * 60 * 60 * 1000
+  );
 
-  const weeklyDistanceKm = parseFloat((recentActivities.reduce((acc, curr) => acc + curr.distance, 0) / 1000).toFixed(2));
-  const weeklyDurationMins = Math.round(recentActivities.reduce((acc, curr) => acc + curr.duration, 0) / 60);
-  const weeklyCalories = recentActivities.reduce((acc, curr) => acc + (curr.calories || 0), 0);
+  const [allTime, weekAgg, activities, perType] = await Promise.all([
+    // Totals are summed by the database over every activity ever logged, so
+    // they stay right however long the athlete has been training — and no
+    // longer disagree with a truncated list.
+    prisma.activity.aggregate({
+      where: scope,
+      _sum: { distance: true, duration: true, calories: true },
+      _count: { _all: true },
+    }),
+    prisma.activity.aggregate({
+      where: { ...scope, createdAt: { gte: sevenDaysAgo } },
+      _sum: { distance: true, duration: true, calories: true },
+      _count: { _all: true },
+    }),
+    // A date window, not a row count. `slice(0, 365)` meant 365 *activities*,
+    // so someone training twice a day ran out of calendar after six months
+    // while someone training weekly had seven years of it.
+    //
+    // `select` matters as much: this used to return every row in full,
+    // including routeData. A few months of traced runs made this response
+    // several megabytes to draw a screen that reads five fields per activity.
+    prisma.activity.findMany({
+      where: { ...scope, createdAt: { gte: windowStart } },
+      orderBy: { createdAt: 'desc' },
+      select: ANALYTICS_SELECT,
+    }),
+    // Personal bests, all-time and held separately per activity type — a yoga
+    // session and a run should not compete for one "longest".
+    prisma.activity.groupBy({
+      by: ['type'],
+      where: scope,
+      _max: { distance: true, duration: true, calories: true },
+      _min: { avgPace: true },
+      _sum: { distance: true, duration: true },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const totalDistanceMeters = allTime._sum.distance || 0;
+  const totalDurationSecs = allTime._sum.duration || 0;
+  const totalCalories = allTime._sum.calories || 0;
+  const totalWorkouts = allTime._count._all;
+
+  const weeklyDistanceKm = parseFloat(
+    ((weekAgg._sum.distance || 0) / 1000).toFixed(2)
+  );
+  const weeklyDurationMins = Math.round((weekAgg._sum.duration || 0) / 60);
+  const weeklyCalories = weekAgg._sum.calories || 0;
+
+  const records = perType.map((row) => ({
+    type: row.type,
+    sessions: row._count._all,
+    longestDistanceKm: parseFloat(((row._max.distance || 0) / 1000).toFixed(2)),
+    longestDurationSecs: row._max.duration || 0,
+    mostCalories: row._max.calories || 0,
+    // A null pace means nothing in this type was distance-tracked.
+    bestPace: row._min.avgPace,
+    totalDistanceKm: parseFloat(((row._sum.distance || 0) / 1000).toFixed(2)),
+    totalDurationSecs: row._sum.duration || 0,
+  }));
 
   res.json({
     summary: {
@@ -156,11 +220,16 @@ async function getAnalytics(req, res) {
       distanceKm: weeklyDistanceKm,
       durationMins: weeklyDurationMins,
       calories: weeklyCalories,
-      workoutCount: recentActivities.length,
+      workoutCount: weekAgg._count._all,
     },
-    // The analytics screen builds month calendars, streak heatmaps and
-    // personal records from this list, so it needs more than a short preview.
-    recentActivities: userActivities.slice(0, 365),
+    // Two years of activity, trimmed to the fields the screen reads. Keeps the
+    // existing key so the calendar, heatmap, breakdown and trends carry on
+    // working unchanged.
+    recentActivities: activities,
+    windowDays: ANALYTICS_WINDOW_DAYS,
+    // All-time bests per activity type. Unlike the list above these are never
+    // truncated, so a record cannot vanish once it ages out of the window.
+    records,
   });
 }
 
