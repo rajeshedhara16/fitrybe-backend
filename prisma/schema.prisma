@@ -92,6 +92,7 @@ model User {
   posts                  Post[]
   comments               Comment[]
   likes                  Like[]
+  commentLikes           CommentLike[]
   trybeMembers           TrybeMember[]
   trybesCreated          Trybe[]              @relation("TrybeCreator")
   following              Follow[]             @relation("FollowerRelation")
@@ -185,9 +186,29 @@ model Comment {
   author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
   authorId  String
   text      String
+  // A reply quotes its parent comment. Cascade here: deleting a comment takes
+  // the conversation hanging off it, which is what a reader expects — an
+  // orphaned reply to nothing reads as broken.
+  parent    Comment? @relation("CommentReply", fields: [parentId], references: [id], onDelete: Cascade)
+  parentId  String?
+  replies   Comment[] @relation("CommentReply")
+  likes     CommentLike[]
   createdAt DateTime @default(now())
 
   @@index([postId])
+  @@index([parentId])
+}
+
+model CommentLike {
+  id        String   @id @default(uuid())
+  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  commentId String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  createdAt DateTime @default(now())
+
+  @@unique([commentId, userId])
+  @@index([commentId])
 }
 
 model Trybe {

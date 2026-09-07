@@ -13,6 +13,51 @@ const POST_INCLUDE = {
   _count: { select: { likes: true, comments: true } },
 };
 
+const COMMENT_AUTHOR = {
+  select: { id: true, firstName: true, lastName: true, avatarUrl: true },
+};
+
+/**
+ * A comment with its like count, whether the viewer liked it, and its replies.
+ *
+ * Threading is one level deep on purpose: a reply to a reply still belongs to
+ * the same conversation, so it is attached to the top-level comment rather
+ * than nested further. That keeps the thread readable on a phone and the
+ * query a single round trip.
+ */
+function serializeComment(comment, viewerId) {
+  const { _count, likes, replies, ...rest } = comment;
+  return {
+    ...rest,
+    likeCount: _count ? _count.likes : 0,
+    likedByMe: Array.isArray(likes) ? likes.length > 0 : false,
+    replyCount: _count ? _count.replies : 0,
+    replies: Array.isArray(replies)
+      ? replies.map((r) => serializeComment(r, viewerId))
+      : [],
+  };
+}
+
+function commentInclude(viewerId, withReplies) {
+  return {
+    author: COMMENT_AUTHOR,
+    _count: { select: { likes: true, replies: true } },
+    likes: { where: { userId: viewerId }, select: { id: true } },
+    ...(withReplies
+      ? {
+          replies: {
+            orderBy: { createdAt: 'asc' },
+            include: {
+              author: COMMENT_AUTHOR,
+              _count: { select: { likes: true, replies: true } },
+              likes: { where: { userId: viewerId }, select: { id: true } },
+            },
+          },
+        }
+      : {}),
+  };
+}
+
 function serializePost(post, viewerId) {
   const { _count, likes, activity, ...rest } = post;
   return {
@@ -180,14 +225,15 @@ async function listComments(req, res) {
     throw new AppError(404, 'Post not found');
   }
 
+  // Only top-level comments are listed; each carries its own replies, so a
+  // reply never appears twice.
   const comments = await prisma.comment.findMany({
-    where: { postId: req.params.postId },
+    where: { postId: req.params.postId, parentId: null },
     orderBy: { createdAt: 'asc' },
-    include: {
-      author: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
-    },
+    include: commentInclude(req.userId, true),
   });
-  res.json({ comments });
+
+  res.json({ comments: comments.map((c) => serializeComment(c, req.userId)) });
 }
 
 async function createComment(req, res) {
@@ -196,30 +242,97 @@ async function createComment(req, res) {
     throw new AppError(404, 'Post not found');
   }
 
+  // A reply must belong to a comment on this same post, or it would graft a
+  // conversation onto a thread its author may not even be able to see.
+  let parent = null;
+  if (req.body.parentId) {
+    parent = await prisma.comment.findUnique({
+      where: { id: req.body.parentId },
+      select: { id: true, postId: true, authorId: true, parentId: true },
+    });
+    if (!parent || parent.postId !== post.id) {
+      throw new AppError(400, 'You can only reply to a comment on this post');
+    }
+  }
+
   const comment = await prisma.comment.create({
     data: {
       text: req.body.text,
       postId: post.id,
       authorId: req.userId,
+      // Replying to a reply attaches to the same top-level comment, keeping
+      // the thread one level deep.
+      parentId: parent ? parent.parentId || parent.id : undefined,
     },
-    include: {
-      author: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
-    },
+    include: commentInclude(req.userId, false),
   });
 
-  // Create notification if not commenting on own post
-  if (post.authorId !== req.userId) {
+  // Tell the person being replied to, or the post's author for a new comment.
+  // Never notify someone about their own action.
+  const recipientId = parent ? parent.authorId : post.authorId;
+  if (recipientId && recipientId !== req.userId) {
     await createNotification({
-      recipientId: post.authorId,
+      recipientId,
       actorId: req.userId,
       type: 'COMMENT',
-      title: 'New Comment',
-      body: `commented: "${req.body.text.substring(0, 40)}"`,
+      title: parent ? 'New Reply' : 'New Comment',
+      body: `${parent ? 'replied' : 'commented'}: "${req.body.text.substring(0, 40)}"`,
       entityId: post.id,
     });
   }
 
-  res.status(201).json({ comment });
+  res.status(201).json({ comment: serializeComment(comment, req.userId) });
+}
+
+/** Adds the caller's like to a comment. Liking twice stays one like. */
+async function likeComment(req, res) {
+  const comment = await prisma.comment.findUnique({
+    where: { id: req.params.commentId },
+    select: { id: true, postId: true, authorId: true },
+  });
+
+  const post = comment
+    ? await prisma.post.findUnique({ where: { id: comment.postId } })
+    : null;
+  if (!comment || comment.postId !== req.params.postId || !post ||
+      !(await canViewPost(req.userId, post))) {
+    throw new AppError(404, 'Comment not found');
+  }
+
+  await prisma.commentLike.upsert({
+    where: {
+      commentId_userId: { commentId: comment.id, userId: req.userId },
+    },
+    create: { commentId: comment.id, userId: req.userId },
+    update: {},
+  });
+
+  if (comment.authorId !== req.userId) {
+    await createNotification({
+      recipientId: comment.authorId,
+      actorId: req.userId,
+      type: 'LIKE',
+      title: 'New Like',
+      body: 'liked your comment.',
+      entityId: comment.postId,
+    });
+  }
+
+  const likeCount = await prisma.commentLike.count({
+    where: { commentId: comment.id },
+  });
+  res.status(201).json({ liked: true, likeCount });
+}
+
+async function unlikeComment(req, res) {
+  await prisma.commentLike.deleteMany({
+    where: { commentId: req.params.commentId, userId: req.userId },
+  });
+
+  const likeCount = await prisma.commentLike.count({
+    where: { commentId: req.params.commentId },
+  });
+  res.json({ liked: false, likeCount });
 }
 
 module.exports = {
@@ -232,4 +345,6 @@ module.exports = {
   unlikePost,
   listComments,
   createComment,
+  likeComment,
+  unlikeComment,
 };

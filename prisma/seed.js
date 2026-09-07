@@ -22,7 +22,7 @@ async function main() {
       avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400',
       bannerUrl: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1200',
       location: 'San Francisco, CA',
-      activityInterests: ['Running', 'Cycling', 'Trail Running'],
+      activityInterests: ['Running', 'Cycling', 'Hiking'],
       sportInterests: ['Track', 'Triathlon'],
       onboardingCompleted: true,
       height: 178,

@@ -31,5 +31,7 @@ router.delete('/:postId/like', postController.unlikePost);
 
 router.get('/:postId/comments', postController.listComments);
 router.post('/:postId/comments', validateBody(createCommentSchema), postController.createComment);
+router.post('/:postId/comments/:commentId/like', postController.likeComment);
+router.delete('/:postId/comments/:commentId/like', postController.unlikeComment);
 
 module.exports = router;

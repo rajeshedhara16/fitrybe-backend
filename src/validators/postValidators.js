@@ -17,8 +17,10 @@ const updatePostSchema = z.object({
   locationTag: z.string().trim().max(120).optional(),
 });
 
+// `parentId` turns a comment into a reply to an existing one.
 const createCommentSchema = z.object({
   text: z.string().trim().min(1).max(1000),
+  parentId: z.string().uuid().optional(),
 });
 
 const listPostsQuerySchema = z.object({
