@@ -62,32 +62,35 @@ enum NotificationType {
 }
 
 model User {
-  id                  String    @id @default(uuid())
-  email               String    @unique
-  passwordHash        String
-  firstName           String?
-  lastName            String?
-  dob                 DateTime?
-  gender              Gender?
-  bio                 String?
-  avatarUrl           String?
-  bannerUrl           String?
-  location            String?
-  activityInterests   String[]  @default([])
-  sportInterests      String[]  @default([])
-  height              Float?
-  weight              Float?
-  targetWeight        Float?
-  fitnessGoal         String?
-  stepTarget          Int?      @default(10000)
-  weeklyDistanceTarget Float?   @default(25.0)
-  caloriesTarget      Int?      @default(500)
-  onboardingCompleted Boolean   @default(false)
+  id                   String    @id @default(uuid())
+  email                String    @unique
+  // Null for an account created through Google or Apple, which never sets one.
+  // Password sign-in and password change both refuse such an account rather
+  // than handing null to bcrypt.
+  passwordHash         String?
+  firstName            String?
+  lastName             String?
+  dob                  DateTime?
+  gender               Gender?
+  bio                  String?
+  avatarUrl            String?
+  bannerUrl            String?
+  location             String?
+  activityInterests    String[]  @default([])
+  sportInterests       String[]  @default([])
+  height               Float?
+  weight               Float?
+  targetWeight         Float?
+  fitnessGoal          String?
+  stepTarget           Int?      @default(10000)
+  weeklyDistanceTarget Float?    @default(25.0)
+  caloriesTarget       Int?      @default(500)
+  onboardingCompleted  Boolean   @default(false)
   // Bumped on logout and password change; a refresh token carrying an older
   // version is rejected, which is what makes those actions revoke sessions.
-  tokenVersion        Int       @default(0)
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  tokenVersion         Int       @default(0)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   posts                  Post[]
   comments               Comment[]
@@ -107,6 +110,32 @@ model User {
   goals                  UserGoal[]
   achievements           UserAchievement[]
   subscription           Subscription?
+  identities             AuthIdentity[]
+}
+
+/// One way of signing in to an account.
+///
+/// A table rather than a column per provider on the user, so the same person
+/// signing in with Google today and Apple tomorrow reaches one account instead
+/// of splitting into two.
+model AuthIdentity {
+  id       String @id @default(uuid())
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId   String
+  provider String // GOOGLE, APPLE
+
+  /// The provider's own permanent id for this person, never their email. An
+  /// address can be changed or reassigned; this cannot.
+  providerUserId String
+
+  /// What the provider last said their address was, kept for support rather
+  /// than for lookups — the account's own email is the one that counts.
+  email String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([provider, providerUserId])
+  @@index([userId])
 }
 
 model Follow {
@@ -127,13 +156,13 @@ model Activity {
   userId        String
   title         String
   type          String    @default("Run") // Run, Ride, Hike, Walk, Workout
-  duration      Int       // in seconds
-  distance      Float     // in meters
+  duration      Int // in seconds
+  distance      Float // in meters
   calories      Int       @default(0)
-  avgPace       Float?    // min/km or speed
-  maxSpeed      Float?    // km/h or m/s
+  avgPace       Float? // min/km or speed
+  maxSpeed      Float? // km/h or m/s
   elevationGain Float?    @default(0)
-  routeData     Json?     // Array of lat/lng/elevation track points
+  routeData     Json? // Array of lat/lng/elevation track points
   startTime     DateTime  @default(now())
   endTime       DateTime?
   isPublic      Boolean   @default(true)
@@ -180,20 +209,20 @@ model Like {
 }
 
 model Comment {
-  id        String   @id @default(uuid())
-  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  id        String        @id @default(uuid())
+  post      Post          @relation(fields: [postId], references: [id], onDelete: Cascade)
   postId    String
-  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  author    User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
   authorId  String
   text      String
   // A reply quotes its parent comment. Cascade here: deleting a comment takes
   // the conversation hanging off it, which is what a reader expects — an
   // orphaned reply to nothing reads as broken.
-  parent    Comment? @relation("CommentReply", fields: [parentId], references: [id], onDelete: Cascade)
+  parent    Comment?      @relation("CommentReply", fields: [parentId], references: [id], onDelete: Cascade)
   parentId  String?
-  replies   Comment[] @relation("CommentReply")
+  replies   Comment[]     @relation("CommentReply")
   likes     CommentLike[]
-  createdAt DateTime @default(now())
+  createdAt DateTime      @default(now())
 
   @@index([postId])
   @@index([parentId])
@@ -388,15 +417,15 @@ model UserAchievement {
 }
 
 model Subscription {
-  id         String   @id @default(uuid())
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId     String   @unique
-  plan       String   @default("MONTHLY") // MONTHLY, ANNUAL, TRIAL
-  status     String   @default("ACTIVE")  // ACTIVE, CANCELLED, EXPIRED
-  startDate  DateTime @default(now())
-  expiresAt  DateTime
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        String   @id @default(uuid())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String   @unique
+  plan      String   @default("MONTHLY") // MONTHLY, ANNUAL, TRIAL
+  status    String   @default("ACTIVE") // ACTIVE, CANCELLED, EXPIRED
+  startDate DateTime @default(now())
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([userId])
 }

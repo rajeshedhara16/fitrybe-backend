@@ -3,7 +3,7 @@ const AppError = require('../utils/AppError');
 const { deleteByUrls } = require('../services/storage');
 const { createNotification } = require('../utils/notify');
 const { postVisibilityFilter } = require('../utils/visibility');
-const { serializeActivitySummary } = require('../utils/serializers');
+const { serializePost, POST_INCLUDE } = require('./postController');
 
 /** Loads the caller's membership row, or null when they are not a member. */
 function membershipOf(trybeId, userId) {
@@ -257,21 +257,15 @@ async function getTrybePosts(req, res) {
     orderBy: { createdAt: 'desc' },
     take: 20,
     include: {
-      author: {
-        select: { id: true, firstName: true, lastName: true, avatarUrl: true },
-      },
-      activity: true,
-      _count: { select: { likes: true, comments: true } },
+      ...POST_INCLUDE,
+      likes: { where: { userId: req.userId }, select: { userId: true } },
     },
   });
 
-  // Same trimming as the main feed: a card never needs the full GPS trace.
-  res.json({
-    posts: posts.map((p) => ({
-      ...p,
-      activity: serializeActivitySummary(p.activity),
-    })),
-  });
+  // Serialized exactly like the main feed — trimmed activity, `likeCount`,
+  // `commentCount` and `likedByMe` — so a post opened from a Trybe carries the
+  // same numbers and the same heart state as one opened from the feed.
+  res.json({ posts: posts.map((p) => serializePost(p, req.userId)) });
 }
 
 async function joinTrybe(req, res) {

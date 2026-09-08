@@ -37,6 +37,31 @@ r2.endpoint =
 // This is deliberately not fatal. Storage is one subsystem, and a missing
 // bucket should not be able to take down signing in, the feed, or chat along
 // with it — the API keeps serving and only uploads report themselves broken.
+// Google Sign-In. These are OAuth client ids, not secrets — they ship inside
+// the app binary. What matters is that the backend only accepts ID tokens
+// minted for *these* clients, so a token obtained for some other app cannot be
+// replayed here.
+//
+// Android stamps the web client id into the ID token it returns; iOS stamps
+// its own. Both are accepted because both are this app.
+const google = {
+  webClientId: process.env.GOOGLE_WEB_CLIENT_ID || '',
+  iosClientId: process.env.GOOGLE_IOS_CLIENT_ID || '',
+};
+google.audiences = [google.webClientId, google.iosClientId].filter(Boolean);
+google.enabled = google.audiences.length > 0;
+
+// Unset means the Google button returns a 503 saying so, rather than the
+// server accepting tokens it cannot check. Not fatal, for the same reason
+// storage is not: one broken sign-in method should not take the API down.
+if (!google.enabled && nodeEnv === 'production') {
+  console.error(
+    '[fitrybe] Google sign-in is NOT configured — /api/auth/social will ' +
+      'reject Google tokens with 503. Set GOOGLE_WEB_CLIENT_ID and ' +
+      'GOOGLE_IOS_CLIENT_ID to enable it.'
+  );
+}
+
 if (!r2.enabled && nodeEnv === 'production') {
   console.error(
     '[fitrybe] Object storage is NOT configured — image uploads will be ' +
@@ -57,4 +82,5 @@ module.exports = {
   },
   corsOrigins: (process.env.CORS_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean),
   r2,
+  google,
 };

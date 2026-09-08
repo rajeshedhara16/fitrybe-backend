@@ -76,7 +76,32 @@ Content-Type: application/json
   }
   ```
 
-#### 3. Complete Onboarding Profile Details
+#### 3. Sign in with a Provider (Google)
+- **Method & Path**: `POST /api/auth/social`
+- **Request Body**:
+  ```json
+  {
+    "provider": "GOOGLE",
+    "idToken": "eyJhbGci..."
+  }
+  ```
+- Send the ID token exactly as the provider minted it and nothing else. The
+  server verifies its signature against Google's published keys and checks that
+  it was issued for this app, then reads the email and name out of the verified
+  token. An email or name sent alongside it would be unsigned and is ignored.
+- **Response**: the same `user`, `accessToken` and `refreshToken` as login, plus
+  `isNewAccount`. 201 when the account was just created, 200 when it already
+  existed. Route on the user's `onboardingCompleted`, same as password login.
+- Signing in with a Google address that already has a password account attaches
+  to that account rather than making a second one, provided Google marks the
+  address verified. There is no separate Google "sign up".
+- **Errors**: 401 if the token does not verify, 400 if the account shared no
+  email address, 503 if the server has no Google client IDs configured.
+- An account created this way has no password. `hasPassword` on the user says
+  so, password login answers 401 with a message naming Google, and password
+  change answers 400.
+
+#### 4. Complete Onboarding Profile Details
 - **Method & Path**: `PATCH /api/users/me`
 - **Request Body**:
   ```json
@@ -94,7 +119,7 @@ Content-Type: application/json
   }
   ```
 
-#### 4. Change Password
+#### 5. Change Password
 - **Method & Path**: `POST /api/auth/change-password`
 - **Request Body**:
   ```json
@@ -159,10 +184,36 @@ Content-Type: application/json
 - **Like**: `POST /api/posts/:postId/like`
 - **Unlike**: `DELETE /api/posts/:postId/like`
 
-#### 4. Comments
+#### 4. Single Post
+- **Method & Path**: `GET /api/posts/:postId`
+- Returns one post in the same shape as a feed row, so a detail screen can
+  refresh the counts and the viewer's own like state rather than trusting
+  whatever the card that opened it was holding. 404 if the post is gone or its
+  audience excludes the caller.
+
+#### 5. Comments
 - **Get Comments**: `GET /api/posts/:postId/comments`
+  - Only top-level comments are listed; each carries its own `replies`, so a
+    reply never appears twice.
 - **Post Comment**: `POST /api/posts/:postId/comments`
   - Body: `{ "text": "Awesome run pace! 🔥" }`
+  - Add `"parentId"` to reply. Threading is one level deep: replying to a reply
+    attaches to the same top-level comment.
+- **Like / Unlike Comment**: `POST` / `DELETE /api/posts/:postId/comments/:commentId/like`
+  - Both return `{ "liked": true|false, "likeCount": 4 }`.
+- **Comment shape**:
+  ```json
+  {
+    "id": "comment-uuid-1",
+    "text": "Awesome run pace! 🔥",
+    "parentId": null,
+    "likeCount": 4,
+    "likedByMe": true,
+    "replyCount": 2,
+    "replies": [],
+    "author": { "id": "u-uuid-123", "firstName": "Alex", "lastName": "Rivera", "avatarUrl": null }
+  }
+  ```
 
 ---
 
@@ -208,6 +259,12 @@ Content-Type: application/json
   }
   ```
 
+#### List Activities
+- **Method & Path**: `GET /api/activities?limit=20` (Supports `userId`, `type`, `cursor`)
+- Omitting `userId` lists **your own** activities, private ones included. Naming
+  another athlete lists only what they made public.
+- `limit` is capped at 50; asking for more is a 400, not a silent trim.
+
 ---
 
 ## Feature 4: Fitness Analytics & Goal Customization
@@ -231,25 +288,83 @@ Content-Type: application/json
     "weekly": {
       "distanceKm": 34.2,
       "durationMins": 195,
+      "calories": 2400,
       "workoutCount": 5
     },
-    "recentActivities": [...]
+    "recentActivities": [
+      {
+        "id": "act-uuid-1",
+        "type": "Running",
+        "title": "Morning Tempo",
+        "duration": 2100,
+        "distance": 7200.0,
+        "calories": 520,
+        "avgPace": 4.86,
+        "createdAt": "2026-09-03T06:12:00.000Z"
+      }
+    ],
+    "windowDays": 730,
+    "records": [
+      {
+        "type": "Running",
+        "sessions": 34,
+        "longestDistanceKm": 21.1,
+        "longestDurationSecs": 7380,
+        "mostCalories": 1450,
+        "bestPace": 4.42,
+        "totalDistanceKm": 312.7,
+        "totalDurationSecs": 118400
+      }
+    ]
   }
   ```
+- Accepts `?userId=` to read another athlete's figures, built from their public
+  activities only.
+- `recentActivities` is a **two-year window**, trimmed to the fields the screen
+  reads — no `routeData`. `records` are all-time and held per activity type, so
+  a record never vanishes once it ages out of that window.
+- **`weekly` is a rolling seven days in UTC**, which is not the
+  Monday-to-Sunday week the app's goal rings and health figures use. The app
+  counts its own week from `recentActivities` instead, so the two agree on
+  screen. Treat this block as legacy.
 
 #### 2. Get & Set Fitness Goals
-- **Get Goal & Progress**: `GET /api/goals`
-- **Update Goals**: `PUT /api/goals`
+An athlete holds up to three goals at once — one `DAILY`, one `WEEKLY`, one
+`MONTHLY` — each with its own activity, metric and target.
+
+Progress and streaks are worked out on the client, which is the only side that
+knows the athlete's timezone. A run at 1am belongs to that day where they live.
+
+- **Get Goals**: `GET /api/goals`
+  - Returns `{ "goals": [...], "goal": {...} }`. `goals` is the list to read;
+    `goal` is the weekly one, kept for older builds reading a single record.
+- **Update a Goal**: `PUT /api/goals`
+  - Keyed on `period`, so saving a weekly goal leaves the daily and monthly ones
+    untouched.
   - Body:
     ```json
     {
       "period": "WEEKLY",
-      "targetSteps": 12000,
-      "targetDistance": 35.0,
-      "targetCalories": 600,
-      "targetWorkouts": 4
+      "frequency": "Weekly",
+      "activity": "Running",
+      "metric": "Distance",
+      "targetValue": 50,
+      "unit": "Km"
     }
     ```
+  - `metric` is one of `Distance`, `Duration`, `Calories`, `Sessions`. There is
+    no steps metric: an Activity carries no step count, so a steps goal would
+    have nothing to measure against.
+  - `activity` must match the recorder's activity name exactly — matching is
+    case-insensitive but otherwise exact, so a Running goal is not satisfied by
+    a walk.
+  - `unit` is `Km` or `Miles` for a distance goal. The value is stored as typed
+    alongside the unit; the client converts when it compares.
+  - The legacy `targetSteps` / `targetDistance` / `targetCalories` /
+    `targetWorkouts` columns are still accepted and mirrored, but `targetValue`
+    plus `metric` and `unit` is what the app reads back.
+- **Remove one Goal**: `DELETE /api/goals/:period` where `period` is `DAILY`,
+  `WEEKLY` or `MONTHLY`. Returns 204. The other periods are left in place.
 
 ---
 
@@ -299,6 +414,10 @@ Content-Type: application/json
 
 #### 4. Trybe Posts Feed
 - **Method & Path**: `GET /api/trybes/:trybeId/posts`
+- Posts by this Trybe's members, serialized exactly like the main feed —
+  `likeCount`, `commentCount`, `likedByMe` and a trimmed `activity`. A card here
+  reads the same keys it reads anywhere else, so a post opened from a Trybe
+  shows the same numbers as one opened from the feed.
 
 #### 5. Join / Leave Trybe
 - **Join**: `POST /api/trybes/:trybeId/join`

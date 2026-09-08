@@ -336,6 +336,11 @@ async function unlikeComment(req, res) {
 }
 
 module.exports = {
+  // Shared so every surface that returns a post — the feed, a single post, a
+  // Trybe's posts — hands the client the same shape. A card that has to guess
+  // between `_count.likes` and `likeCount` gets one of them wrong.
+  serializePost,
+  POST_INCLUDE,
   listFeed,
   createPost,
   getPost,

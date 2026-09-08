@@ -5,7 +5,10 @@ const { z } = require('zod');
 const updateGoalSchema = z.object({
   period: z.enum(['DAILY', 'WEEKLY', 'MONTHLY']).default('WEEKLY'),
   activity: z.string().trim().min(1).max(60).optional(),
-  metric: z.enum(['Distance', 'Duration', 'Calories', 'Sessions', 'Steps']).optional(),
+  // No 'Steps': an Activity carries distance, duration and calories but no
+  // step count, so a steps goal has nothing to measure progress against. It
+  // used to be accepted here and then silently counted sessions instead.
+  metric: z.enum(['Distance', 'Duration', 'Calories', 'Sessions']).optional(),
   targetValue: z.coerce.number().min(0).optional(),
   unit: z.string().trim().max(30).optional(),
   frequency: z.enum(['Daily', 'Weekly', 'Monthly']).optional(),

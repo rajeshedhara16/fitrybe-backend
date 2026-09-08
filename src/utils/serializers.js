@@ -1,7 +1,13 @@
 function serializeUser(user) {
   if (!user) return null;
   const { passwordHash, ...safe } = user;
-  return safe;
+  return {
+    ...safe,
+    // The hash itself never leaves the server, but whether one exists does:
+    // an account reached through Google has no password, so a settings screen
+    // needs to know not to offer to change one.
+    hasPassword: Boolean(passwordHash),
+  };
 }
 
 /**

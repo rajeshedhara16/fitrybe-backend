@@ -50,6 +50,10 @@ async function updateGoal(req, res) {
   let computedTargetWorkouts = targetWorkouts;
   let computedTargetSteps = targetSteps;
 
+  // `targetValue` plus `metric` and `unit` is what the client actually reads
+  // back; the target* columns below are the older per-metric mirror, kept for
+  // anything still reading them. A 'Duration' goal has no column here, which
+  // costs nothing — nothing reads a duration target off this record.
   if (targetValue !== undefined && metric) {
     const val = parseFloat(targetValue);
     if (metric === 'Distance') {
@@ -59,8 +63,6 @@ async function updateGoal(req, res) {
       computedTargetCalories = Math.round(val);
     } else if (metric === 'Sessions') {
       computedTargetWorkouts = Math.round(val);
-    } else if (metric === 'Steps') {
-      computedTargetSteps = Math.round(val);
     }
   }
 

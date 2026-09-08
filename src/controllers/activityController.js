@@ -72,11 +72,16 @@ async function logActivity(req, res) {
 async function listActivities(req, res) {
   const { userId, type, cursor, limit } = req.validatedQuery;
 
+  // Asking for no one in particular means asking for yourself. This used to
+  // fall through to every athlete's public activities, so the recorder's
+  // "recent activities" list showed strangers' workouts.
+  const targetUserId = userId || req.userId;
+  const isSelf = targetUserId === req.userId;
+
   const whereClause = {
-    ...(userId ? { userId } : {}),
-    // A private activity is only ever visible to the athlete who logged it,
-    // whether or not the caller asked for a specific user's list.
-    ...(userId === req.userId ? {} : { isPublic: true }),
+    userId: targetUserId,
+    // A private activity is only ever visible to the athlete who logged it.
+    ...(isSelf ? {} : { isPublic: true }),
     ...(type ? { type } : {}),
   };
 
@@ -216,6 +221,10 @@ async function getAnalytics(req, res) {
       totalCalories,
       totalWorkouts,
     },
+    // A rolling seven days from now, in UTC — NOT the Monday-to-Sunday week the
+    // app's goal rings and health figures use, and not the athlete's timezone
+    // either. Kept for older builds; the current app counts its own week from
+    // `recentActivities`, which is the only way the two agree on screen.
     weekly: {
       distanceKm: weeklyDistanceKm,
       durationMins: weeklyDurationMins,

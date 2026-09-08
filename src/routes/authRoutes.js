@@ -8,6 +8,7 @@ const {
   loginSchema,
   refreshSchema,
   changePasswordSchema,
+  socialAuthSchema,
 } = require('../validators/authValidators');
 
 const router = Router();
@@ -22,6 +23,7 @@ const authLimiter = rateLimit({
 
 router.post('/register', authLimiter, validateBody(registerSchema), authController.register);
 router.post('/login', authLimiter, validateBody(loginSchema), authController.login);
+router.post('/social', authLimiter, validateBody(socialAuthSchema), authController.social);
 router.post('/refresh', authLimiter, validateBody(refreshSchema), authController.refresh);
 router.get('/me', requireAuth, authController.me);
 router.post('/change-password', requireAuth, validateBody(changePasswordSchema), authController.changePassword);
