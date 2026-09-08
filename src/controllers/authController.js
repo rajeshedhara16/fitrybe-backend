@@ -11,8 +11,28 @@ const { verifyIdentityToken } = require('../services/socialIdentity');
 
 const SALT_ROUNDS = 12;
 
-/** The message a password-less account gets when someone tries to sign in. */
-const NO_PASSWORD = 'This account signs in with Google. Use the Google button.';
+const PROVIDER_NAMES = { GOOGLE: 'Google', APPLE: 'Apple' };
+
+/**
+ * What to tell someone whose account has no password.
+ *
+ * Names the buttons that will actually work for them rather than guessing at
+ * one, so an Apple user is not sent looking for a Google button.
+ */
+async function noPasswordMessage(userId) {
+  const identities = await prisma.authIdentity.findMany({
+    where: { userId },
+    select: { provider: true },
+  });
+
+  const names = [
+    ...new Set(identities.map((i) => PROVIDER_NAMES[i.provider] || i.provider)),
+  ];
+  if (names.length === 0) {
+    return 'This account has no password set.';
+  }
+  return `This account signs in with ${names.join(' or ')}. Use that button.`;
+}
 
 async function register(req, res) {
   const { email, password } = req.body;
@@ -41,12 +61,12 @@ async function login(req, res) {
     throw new AppError(401, 'Invalid email or password');
   }
 
-  // A Google account has no hash to compare against. Say so plainly rather
-  // than "invalid password", which would send someone to reset a password they
-  // never had. Register already discloses that an email is taken, so this
-  // reveals nothing new.
+  // An account reached through a provider has no hash to compare against. Say
+  // so plainly rather than "invalid password", which would send someone to
+  // reset a password they never had. Register already discloses that an email
+  // is taken, so naming the provider reveals nothing new.
   if (!user.passwordHash) {
-    throw new AppError(401, NO_PASSWORD);
+    throw new AppError(401, await noPasswordMessage(user.id));
   }
 
   const passwordMatches = await bcrypt.compare(password, user.passwordHash);
@@ -67,7 +87,7 @@ async function login(req, res) {
  * Three cases, in order:
  *  1. We have seen this provider identity before. Sign that account in.
  *  2. We have not, but an account already holds the address the provider
- *     vouches for. Attach the identity to it, so signing in with Google
+ *     vouches for. Attach the identity to it, so signing in with a provider
  *     reaches the account someone made with a password rather than a second,
  *     empty one under the same address.
  *  3. Neither. Make a new account.
@@ -120,7 +140,7 @@ async function resolveSocialAccount(identity) {
     }
   } else if (identity.firstName && !user.firstName) {
     // Fill in a name the account never had. Never overwrite one the athlete
-    // set themselves — their profile is theirs, not Google's.
+    // set themselves — their profile is theirs, not the provider's.
     user = await prisma.user.update({
       where: { id: user.id },
       data: { firstName: identity.firstName, lastName: identity.lastName },
@@ -142,9 +162,17 @@ async function resolveSocialAccount(identity) {
  * login so the client's session handling is identical either way.
  */
 async function social(req, res) {
-  const { provider, idToken } = req.body;
+  const { provider, idToken, firstName, lastName } = req.body;
 
   const identity = await verifyIdentityToken(provider, idToken);
+
+  // Apple carries no name in its token and volunteers one exactly once, on the
+  // first authorization, so the app passes it alongside. Only ever consulted
+  // when the verified token itself said nothing, and even then it does no more
+  // than fill a blank on a new account.
+  identity.firstName = identity.firstName || firstName || null;
+  identity.lastName = identity.lastName || lastName || null;
+
   const { user, created } = await resolveSocialAccount(identity);
 
   res.status(created ? 201 : 200).json({
@@ -205,7 +233,7 @@ async function changePassword(req, res) {
   // Nothing to change, and no current password to prove ownership with. Adding
   // a first password to a Google account needs its own flow, not this one.
   if (!user.passwordHash) {
-    throw new AppError(400, 'This account has no password. It signs in with Google.');
+    throw new AppError(400, await noPasswordMessage(user.id));
   }
 
   const matches = await bcrypt.compare(currentPassword, user.passwordHash);

@@ -19,15 +19,23 @@ const changePasswordSchema = z.object({
   newPassword: z.string().min(6).max(72),
 });
 
-// Only providers this server can actually verify are accepted. 'APPLE' joins
-// the list the day the Apple token check lands, not before — accepting a
-// provider we cannot check would be accepting anything.
+// Only providers this server can actually verify are accepted. Accepting one
+// whose tokens we cannot check would be accepting anything.
 //
-// No email or name field: whatever the client claims about who it is would be
-// unsigned, and the verified token carries all of it anyway.
+// No email field, ever: the address decides which account you reach, so it is
+// taken from the verified token and nothing else.
+//
+// The names are the one exception, and only because Apple leaves us no choice.
+// Apple puts no name in the identity token and hands it to the app exactly
+// once, on the very first authorization. Ignoring it would mean every Apple
+// account is permanently nameless. It is treated as the cosmetic hint it is:
+// used only to fill a blank on a brand new account, never to decide who you
+// are and never to overwrite a name already set.
 const socialAuthSchema = z.object({
-  provider: z.enum(['GOOGLE']),
+  provider: z.enum(['GOOGLE', 'APPLE']),
   idToken: z.string().min(1).max(8192),
+  firstName: z.string().trim().min(1).max(60).optional(),
+  lastName: z.string().trim().min(1).max(60).optional(),
 });
 
 module.exports = {

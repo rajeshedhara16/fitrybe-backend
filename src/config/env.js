@@ -62,6 +62,24 @@ if (!google.enabled && nodeEnv === 'production') {
   );
 }
 
+// Sign in with Apple. The audience of an identity token is whichever client
+// asked for it: the bundle identifier for the native iOS flow, a Services ID
+// for the web/Android redirect flow. Both are listed so either is accepted, and
+// like the Google ids neither is a secret.
+const apple = {
+  bundleId: process.env.APPLE_BUNDLE_ID || '',
+  serviceId: process.env.APPLE_SERVICE_ID || '',
+};
+apple.audiences = [apple.bundleId, apple.serviceId].filter(Boolean);
+apple.enabled = apple.audiences.length > 0;
+
+if (!apple.enabled && nodeEnv === 'production') {
+  console.error(
+    '[fitrybe] Sign in with Apple is NOT configured — /api/auth/social will ' +
+      'reject Apple tokens with 503. Set APPLE_BUNDLE_ID to enable it.'
+  );
+}
+
 if (!r2.enabled && nodeEnv === 'production') {
   console.error(
     '[fitrybe] Object storage is NOT configured — image uploads will be ' +
@@ -83,4 +101,5 @@ module.exports = {
   corsOrigins: (process.env.CORS_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean),
   r2,
   google,
+  apple,
 };

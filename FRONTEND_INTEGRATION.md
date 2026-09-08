@@ -76,7 +76,7 @@ Content-Type: application/json
   }
   ```
 
-#### 3. Sign in with a Provider (Google)
+#### 3. Sign in with a Provider (Google, Apple)
 - **Method & Path**: `POST /api/auth/social`
 - **Request Body**:
   ```json
@@ -85,21 +85,33 @@ Content-Type: application/json
     "idToken": "eyJhbGci..."
   }
   ```
-- Send the ID token exactly as the provider minted it and nothing else. The
-  server verifies its signature against Google's published keys and checks that
-  it was issued for this app, then reads the email and name out of the verified
-  token. An email or name sent alongside it would be unsigned and is ignored.
+- `provider` is `GOOGLE` or `APPLE`. For Apple, add `firstName` and `lastName`
+  when the credential carried them. Apple puts no name in its token and hands
+  one over exactly once, on the very first authorization for the app, so this is
+  the only chance to capture it. It is used only to fill a blank on a brand new
+  account, never to decide who the caller is and never to overwrite a name the
+  athlete already set. Nothing else may be sent: the email in particular is read
+  from the verified token and from nowhere else.
+- Send the token exactly as the provider minted it. The server verifies its
+  signature against that provider's published keys and checks it was issued for
+  this app, then reads the identity out of the verified token.
 - **Response**: the same `user`, `accessToken` and `refreshToken` as login, plus
   `isNewAccount`. 201 when the account was just created, 200 when it already
   existed. Route on the user's `onboardingCompleted`, same as password login.
-- Signing in with a Google address that already has a password account attaches
-  to that account rather than making a second one, provided Google marks the
-  address verified. There is no separate Google "sign up".
-- **Errors**: 401 if the token does not verify, 400 if the account shared no
-  email address, 503 if the server has no Google client IDs configured.
+- Signing in with an address that already has a password account attaches to
+  that account rather than making a second one, provided the provider marks the
+  address verified. There is no separate "sign up" for either provider; the same
+  call serves both buttons.
+- **Errors**: 401 if the token does not verify, 400 if the sign-in shared no
+  email address, 503 if that provider is not configured on the server.
 - An account created this way has no password. `hasPassword` on the user says
-  so, password login answers 401 with a message naming Google, and password
-  change answers 400.
+  so, and both password login and password change refuse it with a message
+  naming the providers that account can actually sign in with.
+- Apple's Hide My Email addresses are unique per app, so they never match an
+  existing account and always start a new one. That is correct, not a bug.
+- Neither provider's token carries a nonce here, so a token intercepted inside
+  its short lifetime could in principle be replayed. Closing that needs a
+  server-issued nonce per attempt; worth doing if the threat model warrants it.
 
 #### 4. Complete Onboarding Profile Details
 - **Method & Path**: `PATCH /api/users/me`
