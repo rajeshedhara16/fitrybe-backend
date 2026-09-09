@@ -9,6 +9,7 @@ const {
 } = require('../utils/jwt');
 const { verifyIdentityToken } = require('../services/socialIdentity');
 const mailer = require('../services/mailer');
+const appleTokens = require('../services/appleTokens');
 const crypto = require('crypto');
 
 const SALT_ROUNDS = 12;
@@ -155,11 +156,19 @@ async function resolveSocialAccount(identity) {
     });
   }
 
-  // Upsert rather than create so a double-tapped button is harmless.
+  // Upsert rather than create so a double-tapped button is harmless. A null
+  // refresh token is never written over a good one: a later sign-in that
+  // produced none must not destroy the only means of revoking the account.
+  const refreshToken = identity.refreshToken || undefined;
   await prisma.authIdentity.upsert({
     where: { provider_providerUserId: key },
-    create: { ...key, userId: user.id, email: identity.email },
-    update: { email: identity.email },
+    create: {
+      ...key,
+      userId: user.id,
+      email: identity.email,
+      providerRefreshToken: identity.refreshToken || null,
+    },
+    update: { email: identity.email, providerRefreshToken: refreshToken },
   });
 
   return { user, created };
@@ -170,7 +179,7 @@ async function resolveSocialAccount(identity) {
  * login so the client's session handling is identical either way.
  */
 async function social(req, res) {
-  const { provider, idToken, firstName, lastName } = req.body;
+  const { provider, idToken, firstName, lastName, authorizationCode } = req.body;
 
   const identity = await verifyIdentityToken(provider, idToken);
 
@@ -180,6 +189,15 @@ async function social(req, res) {
   // than fill a blank on a new account.
   identity.firstName = identity.firstName || firstName || null;
   identity.lastName = identity.lastName || lastName || null;
+
+  // Apple's authorization code is worth a refresh token, and a refresh token is
+  // the only thing that can later be revoked. Exchanged now because the code is
+  // single-use and expires in minutes; it will not still be there at deletion
+  // time. Returns null on any failure, which must not fail the sign-in.
+  if (provider === 'APPLE' && authorizationCode) {
+    identity.refreshToken =
+        await appleTokens.exchangeAuthorizationCode(authorizationCode);
+  }
 
   const { user, created } = await resolveSocialAccount(identity);
 
@@ -267,17 +285,15 @@ async function forgotPassword(req, res) {
       },
     });
 
-    try {
-      await mailer.sendPasswordResetCode({
-        to: user.email,
-        code,
-        minutes: RESET_TTL_MINUTES,
-      });
-    } catch (err) {
-      // Logged, not surfaced: telling the caller that delivery failed would
-      // confirm the address belongs to an account.
+    // Send email asynchronously in background so SMTP socket delays never
+    // block the HTTP response or cause client timeouts.
+    mailer.sendPasswordResetCode({
+      to: user.email,
+      code,
+      minutes: RESET_TTL_MINUTES,
+    }).catch((err) => {
       console.error('[fitrybe] password reset email failed:', err.message);
-    }
+    });
   }
 
   res.json({

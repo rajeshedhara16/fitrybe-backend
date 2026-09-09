@@ -3,6 +3,8 @@ const AppError = require('../utils/AppError');
 const { serializeUser } = require('../utils/serializers');
 const { deleteByUrls } = require('../services/storage');
 const { createNotification } = require('../utils/notify');
+const bcrypt = require('bcryptjs');
+const appleTokens = require('../services/appleTokens');
 
 async function getUserById(req, res) {
   const user = await prisma.user.findUnique({ where: { id: req.params.userId } });
@@ -204,8 +206,71 @@ async function getFollowing(req, res) {
   res.json({ following: following.map((f) => f.following) });
 }
 
+/**
+ * Permanently deletes the caller's account.
+ *
+ * Required by App Review guideline 5.1.1(v) of any app that lets people create
+ * an account. It is a real deletion, not a flag: the row goes, and every
+ * post, activity, comment, message, goal and membership goes with it through
+ * the schema's cascades.
+ *
+ * Order matters. Apple is told first and the image URLs are read first, because
+ * once the row is gone both the tokens and the paths are unrecoverable, and the
+ * files would sit in the bucket being paid for forever.
+ */
+async function deleteMe(req, res) {
+  const user = await prisma.user.findUnique({
+    where: { id: req.userId },
+    select: { id: true, passwordHash: true, avatarUrl: true, bannerUrl: true },
+  });
+  if (!user) {
+    throw new AppError(404, 'User not found');
+  }
+
+  // An account with a password proves it is really them. One without has no
+  // password to give — they got here through a provider — so the app's typed
+  // confirmation is what stands in, and the access token is the proof.
+  if (user.passwordHash) {
+    const password = `${req.body.password || ''}`;
+    if (!password || !(await bcrypt.compare(password, user.passwordHash))) {
+      throw new AppError(401, 'That password is incorrect');
+    }
+  }
+
+  // Apple requires the account to be revoked with them, not merely forgotten
+  // here. Best effort: if Apple is unreachable the deletion still goes through,
+  // because someone must never be trapped in an account they asked to leave.
+  const identities = await prisma.authIdentity.findMany({
+    where: { userId: user.id, provider: 'APPLE' },
+    select: { providerRefreshToken: true },
+  });
+  for (const identity of identities) {
+    await appleTokens.revokeToken(identity.providerRefreshToken);
+  }
+
+  // Read while the rows still exist. Post images are the bulk of it.
+  const posts = await prisma.post.findMany({
+    where: { authorId: user.id },
+    select: { imageUrls: true },
+  });
+  const media = [
+    user.avatarUrl,
+    user.bannerUrl,
+    ...posts.flatMap((p) => p.imageUrls),
+  ].filter(Boolean);
+
+  await prisma.user.delete({ where: { id: user.id } });
+
+  // After the row, never before: an orphaned file is untidy, but a deleted file
+  // still referenced by a live account is a broken profile.
+  await deleteByUrls(media);
+
+  res.status(204).send();
+}
+
 module.exports = {
   getUserById,
+  deleteMe,
   searchUsers,
   updateMe,
   uploadAvatar,

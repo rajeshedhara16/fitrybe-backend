@@ -73,10 +73,36 @@ const apple = {
 apple.audiences = [apple.bundleId, apple.serviceId].filter(Boolean);
 apple.enabled = apple.audiences.length > 0;
 
+// Revoking a deleted account's Apple tokens needs a signed client secret, which
+// needs the private key from the Apple Developer portal. Verifying a sign-in
+// does not — that uses only Apple's public keys — so these three are separate
+// from the audiences above and only account deletion depends on them.
+//
+// APPLE_PRIVATE_KEY is the contents of the .p8 file and is a real secret. Kept
+// on one line in the environment with the newlines escaped, so it is restored
+// here before use.
+apple.teamId = process.env.APPLE_TEAM_ID || '';
+apple.keyId = process.env.APPLE_KEY_ID || '';
+apple.privateKey = (process.env.APPLE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
+apple.canRevoke = Boolean(
+  apple.teamId && apple.keyId && apple.privateKey && apple.bundleId
+);
+
 if (!apple.enabled && nodeEnv === 'production') {
   console.error(
     '[fitrybe] Sign in with Apple is NOT configured — /api/auth/social will ' +
       'reject Apple tokens with 503. Set APPLE_BUNDLE_ID to enable it.'
+  );
+}
+
+// App Review guideline 5.1.1(v) requires an app offering Sign in with Apple to
+// revoke tokens when an account is deleted. Deletion still works without this,
+// but the submission is out of compliance, so it is worth shouting about.
+if (apple.enabled && !apple.canRevoke && nodeEnv === 'production') {
+  console.error(
+    '[fitrybe] Apple token revocation is NOT configured — deleting an Apple ' +
+      'account will not revoke it with Apple, which App Review requires. Set ' +
+      'APPLE_TEAM_ID, APPLE_KEY_ID and APPLE_PRIVATE_KEY.'
   );
 }
 

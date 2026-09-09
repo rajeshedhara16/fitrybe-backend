@@ -133,6 +133,12 @@ model AuthIdentity {
   /// than for lookups — the account's own email is the one that counts.
   email String?
 
+  /// Apple only. Obtained by exchanging the authorization code at sign-in, and
+  /// kept for exactly one purpose: Apple requires an app that offers Sign in
+  /// with Apple to revoke the user's tokens when their account is deleted, and
+  /// revocation needs a token to revoke. Never used to act on anyone's behalf.
+  providerRefreshToken String?
+
   createdAt DateTime @default(now())
 
   @@unique([provider, providerUserId])

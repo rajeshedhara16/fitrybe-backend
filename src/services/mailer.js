@@ -21,6 +21,9 @@ function getTransport() {
     // 465 is implicit TLS; everything else starts plaintext and upgrades.
     secure: env.mail.port === 465,
     auth: { user: env.mail.user, pass: env.mail.pass },
+    connectionTimeout: 5000,
+    greetingTimeout: 5000,
+    socketTimeout: 10000,
   });
   return transport;
 }

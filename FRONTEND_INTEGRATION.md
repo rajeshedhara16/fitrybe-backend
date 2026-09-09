@@ -631,6 +631,26 @@ knows the athlete's timezone. A run at 1am belongs to that day where they live.
 - **List Followers**: `GET /api/users/:userId/followers`
 - **List Following**: `GET /api/users/:userId/following`
 
+#### 4. Delete Account
+- **Method & Path**: `DELETE /api/users/me`
+- Body: `{ "password": "..." }` for an account that has one; send nothing for an
+  account reached only through Google or Apple. `hasPassword` on the user says
+  which case applies.
+- **Response**: 204. 401 if the password is wrong or missing when one is
+  required.
+- Required by App Review guideline 5.1.1(v) for any app offering account
+  creation. It is a real deletion, not a deactivation flag: posts, activities,
+  comments, messages, goals, memberships and follows all go with the row through
+  the schema's cascades, and the stored avatar, banner and post images are
+  removed from object storage.
+- For an account created with Sign in with Apple, the server revokes the tokens
+  with Apple first, which Apple requires. Revocation is best effort: if Apple is
+  unreachable the deletion still proceeds, because nobody may be trapped in an
+  account they asked to leave. That needs `APPLE_TEAM_ID`, `APPLE_KEY_ID` and
+  `APPLE_PRIVATE_KEY` configured, and the authorization code captured at sign-in.
+- The caller's tokens die with the account, so the app must clear its own
+  session locally afterwards rather than calling logout.
+
 ---
 
 ## Feature 10: Subscriptions & Gamified Achievements

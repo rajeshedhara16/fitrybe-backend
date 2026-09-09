@@ -36,6 +36,11 @@ const socialAuthSchema = z.object({
   idToken: z.string().min(1).max(8192),
   firstName: z.string().trim().min(1).max(60).optional(),
   lastName: z.string().trim().min(1).max(60).optional(),
+  // Apple only. Traded with Apple for a refresh token, which exists purely so
+  // the account can be revoked with Apple if it is ever deleted — App Review
+  // requires that. Unverified and untrusted: the worst a junk value can do is
+  // fail the exchange, which costs nothing at sign-in.
+  authorizationCode: z.string().trim().min(1).max(2048).optional(),
 });
 
 const forgotPasswordSchema = z.object({

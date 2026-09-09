@@ -5,6 +5,7 @@ const { validateBody, validateQuery } = require('../utils/validate');
 const {
   updateProfileSchema,
   userSearchSchema,
+  deleteAccountSchema,
 } = require('../validators/userValidators');
 const { makeUploader } = require('../middleware/upload');
 
@@ -16,6 +17,7 @@ router.use(requireAuth);
 
 router.get('/search', validateQuery(userSearchSchema), userController.searchUsers);
 router.patch('/me', validateBody(updateProfileSchema), userController.updateMe);
+router.delete('/me', validateBody(deleteAccountSchema), userController.deleteMe);
 router.post('/me/avatar', ...uploadAvatar.single('avatar'), userController.uploadAvatar);
 router.post('/me/banner', ...uploadBanner.single('banner'), userController.uploadBanner);
 

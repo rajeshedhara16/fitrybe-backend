@@ -36,4 +36,11 @@ const userSearchSchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(20),
 });
 
-module.exports = { updateProfileSchema, userSearchSchema };
+// Deleting an account that has a password requires that password. One reached
+// only through Google or Apple has none to give, so the field is optional here
+// and the controller decides which case applies.
+const deleteAccountSchema = z.object({
+  password: z.string().min(1).max(72).optional(),
+});
+
+module.exports = { updateProfileSchema, userSearchSchema, deleteAccountSchema };
