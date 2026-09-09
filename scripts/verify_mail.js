@@ -44,6 +44,23 @@ async function main() {
   ok(`From: ${env.mail.from}`);
   if (env.mail.provider === 'resend') {
     ok(`API key present (${env.mail.resendApiKey.length} chars)`);
+
+    // Nobody can verify gmail.com, so a consumer address as the sender is
+    // rejected every time. Worth catching here rather than as a 403 later.
+    const sender = (env.mail.from.match(/[^\s<>]+@[^\s<>]+/) || [''])[0];
+    const domain = sender.split('@')[1] || '';
+    const consumer = [
+      'gmail.com', 'googlemail.com', 'yahoo.com', 'outlook.com',
+      'hotmail.com', 'live.com', 'icloud.com', 'proton.me', 'protonmail.com',
+    ];
+    if (consumer.includes(domain.toLowerCase())) {
+      bad(
+        `MAIL_FROM is ${domain}, which cannot be verified as a sending domain`,
+        'Use onboarding@resend.dev while testing (it only delivers to the ' +
+          'address you signed up with), or verify a domain you own and send ' +
+          'from that.'
+      );
+    }
   } else {
     ok(`Host: ${env.mail.host}:${env.mail.port}`);
     ok(`User: ${env.mail.user}`);
