@@ -111,6 +111,7 @@ model User {
   achievements           UserAchievement[]
   subscription           Subscription?
   identities             AuthIdentity[]
+  passwordResets         PasswordReset[]
 }
 
 /// One way of signing in to an account.
@@ -136,6 +137,33 @@ model AuthIdentity {
 
   @@unique([provider, providerUserId])
   @@index([userId])
+}
+
+/// A one-time code emailed to prove control of an address before a password is
+/// replaced.
+///
+/// The code itself is never stored, only a bcrypt hash of it, so the table is
+/// worthless to anyone who reads it. Rows are short-lived and single-use.
+model PasswordReset {
+  id     String @id @default(uuid())
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  codeHash  String
+  expiresAt DateTime
+
+  /// Wrong guesses so far. A six-digit code is only 1,000,000 wide, so the
+  /// attempt cap is what actually protects it — not its length.
+  attempts Int @default(0)
+
+  /// Set the moment it is spent. A used code stays on the row rather than being
+  /// deleted, so a second attempt with the same code is refused rather than
+  /// looking like it simply expired.
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model Follow {

@@ -38,10 +38,24 @@ const socialAuthSchema = z.object({
   lastName: z.string().trim().min(1).max(60).optional(),
 });
 
+const forgotPasswordSchema = z.object({
+  email: z.string().email(),
+});
+
+const resetPasswordSchema = z.object({
+  email: z.string().email(),
+  // Exactly six digits. Anything else cannot be a code we issued, so it is
+  // refused here rather than burning one of the account's few attempts.
+  code: z.string().trim().regex(/^\d{6}$/, 'Enter the six-digit code'),
+  newPassword: z.string().min(6).max(72),
+});
+
 module.exports = {
   registerSchema,
   loginSchema,
   refreshSchema,
   changePasswordSchema,
   socialAuthSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
 };

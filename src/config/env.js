@@ -88,6 +88,30 @@ if (!r2.enabled && nodeEnv === 'production') {
   );
 }
 
+// Outgoing email, used by password reset. Deliberately plain SMTP rather than
+// one vendor's API, so Resend, SendGrid, SES, Postmark or a plain mailbox all
+// work by changing these four values and nothing else.
+//
+// Unlike the OAuth client ids above, SMTP_PASS *is* a secret.
+const mail = {
+  host: process.env.SMTP_HOST || '',
+  port: parseInt(process.env.SMTP_PORT, 10) || 587,
+  user: process.env.SMTP_USER || '',
+  pass: process.env.SMTP_PASS || '',
+  from: process.env.MAIL_FROM || 'Fitrybe <no-reply@fitrybe.app>',
+};
+mail.enabled = Boolean(mail.host && mail.user && mail.pass);
+
+// Without it there is no way to deliver a reset code, so the endpoint reports
+// itself unavailable rather than accepting requests it cannot honour. Not
+// fatal: the rest of the API is unaffected, same as storage and sign-in.
+if (!mail.enabled && nodeEnv === 'production') {
+  console.error(
+    '[fitrybe] Email is NOT configured — password reset will answer 503. ' +
+      'Set SMTP_HOST, SMTP_USER and SMTP_PASS to enable it.'
+  );
+}
+
 module.exports = {
   nodeEnv,
   port: parseInt(process.env.PORT, 10) || 4000,
@@ -102,4 +126,5 @@ module.exports = {
   r2,
   google,
   apple,
+  mail,
 };

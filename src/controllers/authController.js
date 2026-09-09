@@ -8,8 +8,16 @@ const {
   verifyRefreshToken,
 } = require('../utils/jwt');
 const { verifyIdentityToken } = require('../services/socialIdentity');
+const mailer = require('../services/mailer');
+const crypto = require('crypto');
 
 const SALT_ROUNDS = 12;
+
+/** How long a reset code stays good for. Long enough to find the email. */
+const RESET_TTL_MINUTES = 15;
+
+/** Wrong guesses a single code tolerates before it is burned. */
+const RESET_MAX_ATTEMPTS = 5;
 
 const PROVIDER_NAMES = { GOOGLE: 'Google', APPLE: 'Apple' };
 
@@ -214,6 +222,131 @@ async function refresh(req, res) {
   res.json({ accessToken, refreshToken: newRefreshToken });
 }
 
+/**
+ * A six-digit code, drawn from the OS random source rather than Math.random.
+ *
+ * `randomInt` is uniform over the range; the usual `floor(random() * n)` on a
+ * predictable generator is not, and this code is the only thing standing
+ * between an email inbox and someone's account.
+ */
+function generateResetCode() {
+  return String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+}
+
+/**
+ * Emails a one-time code to whoever owns the address.
+ *
+ * Always answers the same way, whether or not the address belongs to an
+ * account. Anything else turns this endpoint into a way to ask "is this person
+ * a member?" and get an answer, which is a privacy leak on a fitness app where
+ * membership is not public.
+ *
+ * The one exception is a server with no mail configured, which reports itself
+ * unavailable. That answer is identical for every address, so it discloses
+ * nothing about any of them.
+ */
+async function forgotPassword(req, res) {
+  if (!mailer.canSend()) {
+    throw new AppError(503, 'Password reset is unavailable right now');
+  }
+
+  const email = `${req.body.email}`.trim().toLowerCase();
+  const user = await prisma.user.findUnique({ where: { email } });
+
+  if (user) {
+    const code = generateResetCode();
+
+    // Only one live code per account: requesting a second invalidates the
+    // first, so an old email cannot be used after a newer one is sent.
+    await prisma.passwordReset.deleteMany({ where: { userId: user.id } });
+    await prisma.passwordReset.create({
+      data: {
+        userId: user.id,
+        codeHash: await bcrypt.hash(code, SALT_ROUNDS),
+        expiresAt: new Date(Date.now() + RESET_TTL_MINUTES * 60 * 1000),
+      },
+    });
+
+    try {
+      await mailer.sendPasswordResetCode({
+        to: user.email,
+        code,
+        minutes: RESET_TTL_MINUTES,
+      });
+    } catch (err) {
+      // Logged, not surfaced: telling the caller that delivery failed would
+      // confirm the address belongs to an account.
+      console.error('[fitrybe] password reset email failed:', err.message);
+    }
+  }
+
+  res.json({
+    success: true,
+    message: `If that email has an account, a reset code is on its way. It expires in ${RESET_TTL_MINUTES} minutes.`,
+    expiresInMinutes: RESET_TTL_MINUTES,
+  });
+}
+
+/**
+ * Spends a code and sets a new password.
+ *
+ * Every failure answers with the same message. Distinguishing "no such account"
+ * from "wrong code" would hand an attacker the account list for free.
+ *
+ * Works on an account that never had a password — one made through Google or
+ * Apple. Controlling the address is exactly what a reset proves, and it is the
+ * only way such an account can gain a password at all.
+ */
+async function resetPassword(req, res) {
+  const email = `${req.body.email}`.trim().toLowerCase();
+  const { code, newPassword } = req.body;
+  const invalid = new AppError(400, 'That code is wrong or has expired');
+
+  const user = await prisma.user.findUnique({ where: { email } });
+  if (!user) throw invalid;
+
+  const reset = await prisma.passwordReset.findFirst({
+    where: { userId: user.id, usedAt: null, expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: 'desc' },
+  });
+  if (!reset || reset.attempts >= RESET_MAX_ATTEMPTS) throw invalid;
+
+  if (!(await bcrypt.compare(code, reset.codeHash))) {
+    // Six digits is only a million wide, so the cap is what actually protects
+    // it. Counted before answering, so a burst of guesses cannot outrun it.
+    await prisma.passwordReset.update({
+      where: { id: reset.id },
+      data: { attempts: { increment: 1 } },
+    });
+    throw invalid;
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+
+  // One transaction: the code is spent and the password replaced together, so a
+  // failure halfway cannot leave a used code with the old password still set.
+  const [updated] = await prisma.$transaction([
+    prisma.user.update({
+      where: { id: user.id },
+      // Whoever asked for this may be locked out precisely because someone else
+      // is signed in. Bumping the version ends every other session.
+      data: { passwordHash, tokenVersion: { increment: 1 } },
+    }),
+    prisma.passwordReset.update({
+      where: { id: reset.id },
+      data: { usedAt: new Date() },
+    }),
+  ]);
+
+  // Signed straight in on this device, having just proved both the address and
+  // the new password.
+  res.json({
+    user: serializeUser(updated),
+    accessToken: signAccessToken(updated.id),
+    refreshToken: signRefreshToken(updated.id, updated.tokenVersion),
+  });
+}
+
 async function me(req, res) {
   const user = await prisma.user.findUnique({ where: { id: req.userId } });
   if (!user) {
@@ -269,4 +402,14 @@ async function logout(req, res) {
   res.json({ success: true });
 }
 
-module.exports = { register, login, social, refresh, me, changePassword, logout };
+module.exports = {
+  register,
+  login,
+  social,
+  forgotPassword,
+  resetPassword,
+  refresh,
+  me,
+  changePassword,
+  logout,
+};

@@ -131,7 +131,33 @@ Content-Type: application/json
   }
   ```
 
-#### 5. Change Password
+#### 5. Forgot Password
+- **Request a code**: `POST /api/auth/forgot-password`
+  - Body: `{ "email": "runner@fitrybe.app" }`
+  - **Always answers 200 with the same body**, whether or not that address has
+    an account. Do not branch on the response: doing so in the client would leak
+    exactly what the server refuses to say. Show the returned `message` and move
+    to the code step regardless.
+  - A six-digit code is emailed. It lasts 15 minutes, works once, and tolerates
+    5 wrong guesses before it is burned. Asking again invalidates the previous
+    code.
+  - 503 if the server has no mail configured, 429 if asked more than 5 times an
+    hour. Both answers are the same for every address, so neither leaks anything.
+- **Spend the code**: `POST /api/auth/reset-password`
+  - Body: `{ "email": "...", "code": "482913", "newPassword": "..." }`
+  - **Response**: `user`, `accessToken`, `refreshToken`. The caller is signed
+    straight in, having just proved both the address and the new password.
+  - Every failure returns 400 with one identical message, so a wrong code cannot
+    be told apart from an address that has no account.
+  - Succeeds on an account that never had a password, one made through Google or
+    Apple. Controlling the address is what a reset proves, and this is the only
+    way such an account can gain a password.
+  - Resetting bumps `tokenVersion`, so every other device is signed out. Say so
+    in the UI before the button is pressed.
+  - A code is emailed, never a link. A link would need universal links, app
+    links and a web page to land on, none of which this app has.
+
+#### 6. Change Password
 - **Method & Path**: `POST /api/auth/change-password`
 - **Request Body**:
   ```json
