@@ -13,8 +13,34 @@ const env = require('../config/env');
 // send, which is both slow and a good way to get rate-limited by the provider.
 let transport = null;
 
+function isResendKey(key) {
+  return typeof key === 'string' && key.startsWith('re_');
+}
+
+async function sendViaResendHttp(apiKey, { to, subject, text, html }) {
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: env.mail.from,
+      to: Array.isArray(to) ? to : [to],
+      subject,
+      text,
+      html,
+    }),
+  });
+  if (!res.ok) {
+    const errorBody = await res.json().catch(() => ({}));
+    throw new Error(errorBody.message || `Resend API error: ${res.statusText}`);
+  }
+  return res.json();
+}
+
 function getTransport() {
-  if (!env.mail.enabled) return null;
+  if (!env.mail.enabled || isResendKey(env.mail.pass)) return null;
   const isGmail = env.mail.host.includes('gmail');
   transport ??= nodemailer.createTransport({
     ...(isGmail ? { service: 'gmail' } : {
@@ -35,10 +61,15 @@ function getTransport() {
 
 /** Whether email can actually be delivered right now. */
 function canSend() {
-  return env.mail.enabled;
+  return env.mail.enabled || isResendKey(process.env.RESEND_API_KEY || env.mail.pass);
 }
 
 async function send({ to, subject, text, html }) {
+  const resendKey = process.env.RESEND_API_KEY || (isResendKey(env.mail.pass) ? env.mail.pass : null);
+  if (resendKey) {
+    return sendViaResendHttp(resendKey, { to, subject, text, html });
+  }
+
   const mailer = getTransport();
   if (!mailer) {
     throw new Error('Email is not configured');
