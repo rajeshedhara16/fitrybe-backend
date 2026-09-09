@@ -285,15 +285,21 @@ async function forgotPassword(req, res) {
       },
     });
 
+    console.log(`[fitrybe] sending password reset code to: ${user.email}`);
+
     // Send email asynchronously in background so SMTP socket delays never
     // block the HTTP response or cause client timeouts.
     mailer.sendPasswordResetCode({
       to: user.email,
       code,
       minutes: RESET_TTL_MINUTES,
+    }).then(() => {
+      console.log(`[fitrybe] password reset email delivered to ${user.email}`);
     }).catch((err) => {
-      console.error('[fitrybe] password reset email failed:', err.message);
+      console.error('[fitrybe] password reset email failed:', err);
     });
+  } else {
+    console.warn(`[fitrybe] password reset requested for non-existent user: ${email}`);
   }
 
   res.json({

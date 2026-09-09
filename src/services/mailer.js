@@ -15,15 +15,20 @@ let transport = null;
 
 function getTransport() {
   if (!env.mail.enabled) return null;
+  const isGmail = env.mail.host.includes('gmail');
   transport ??= nodemailer.createTransport({
-    host: env.mail.host,
-    port: env.mail.port,
-    // 465 is implicit TLS; everything else starts plaintext and upgrades.
-    secure: env.mail.port === 465,
+    ...(isGmail ? { service: 'gmail' } : {
+      host: env.mail.host,
+      port: env.mail.port,
+      secure: env.mail.port === 465,
+    }),
     auth: { user: env.mail.user, pass: env.mail.pass },
-    connectionTimeout: 5000,
-    greetingTimeout: 5000,
-    socketTimeout: 10000,
+    tls: {
+      rejectUnauthorized: false,
+    },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
   });
   return transport;
 }
