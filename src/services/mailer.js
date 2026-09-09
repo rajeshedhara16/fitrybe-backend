@@ -13,6 +13,11 @@ const env = require('../config/env');
 // send, which is both slow and a good way to get rate-limited by the provider.
 let transport = null;
 
+const dns = require('dns');
+if (dns.setDefaultResultOrder) {
+  dns.setDefaultResultOrder('ipv4first');
+}
+
 function isResendKey(key) {
   return typeof key === 'string' && key.startsWith('re_');
 }
@@ -41,17 +46,15 @@ async function sendViaResendHttp(apiKey, { to, subject, text, html }) {
 
 function getTransport() {
   if (!env.mail.enabled || isResendKey(env.mail.pass)) return null;
-  const isGmail = env.mail.host.includes('gmail');
   transport ??= nodemailer.createTransport({
-    ...(isGmail ? { service: 'gmail' } : {
-      host: env.mail.host,
-      port: env.mail.port,
-      secure: env.mail.port === 465,
-    }),
+    host: env.mail.host || 'smtp.gmail.com',
+    port: env.mail.port || 465,
+    secure: env.mail.port === 465,
     auth: { user: env.mail.user, pass: env.mail.pass },
     tls: {
       rejectUnauthorized: false,
     },
+    family: 4, // Force IPv4 to prevent ENETUNREACH on cloud host IPv6
     connectionTimeout: 10000,
     greetingTimeout: 10000,
     socketTimeout: 15000,
