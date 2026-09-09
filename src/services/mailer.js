@@ -53,8 +53,13 @@ function getTransport() {
     auth: { user: env.mail.user, pass: env.mail.pass },
     tls: {
       rejectUnauthorized: false,
+      servername: env.mail.host || 'smtp.gmail.com',
     },
-    family: 4, // Force IPv4 to prevent ENETUNREACH on cloud host IPv6
+    lookup: (hostname, options, callback) => {
+      dns.lookup(hostname, { family: 4, all: false }, (err, address, family) => {
+        callback(err, address, 4);
+      });
+    },
     connectionTimeout: 10000,
     greetingTimeout: 10000,
     socketTimeout: 15000,
