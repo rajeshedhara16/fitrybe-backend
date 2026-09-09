@@ -114,19 +114,29 @@ if (!r2.enabled && nodeEnv === 'production') {
   );
 }
 
-// Outgoing email, used by password reset. Deliberately plain SMTP rather than
-// one vendor's API, so Resend, SendGrid, SES, Postmark or a plain mailbox all
-// work by changing these four values and nothing else.
+// Outgoing email, used by password reset. Two ways in, tried in this order.
 //
-// Unlike the OAuth client ids above, SMTP_PASS *is* a secret.
+// Both RESEND_API_KEY and SMTP_PASS are real secrets, unlike the OAuth client
+// ids above.
 const mail = {
+  from: process.env.MAIL_FROM || 'Fitrybe <no-reply@fitrybe.app>',
+
+  // Preferred. An HTTPS call to the provider on port 443, which no host blocks.
+  resendApiKey: process.env.RESEND_API_KEY || '',
+
+  // Fallback, and the reason this is no longer the default: platforms routinely
+  // block outbound SMTP to stop their address space being used for spam. The
+  // symptom is a TCP connect timeout — ETIMEDOUT on CONN — which looks like bad
+  // credentials but is the port never opening at all.
   host: process.env.SMTP_HOST || '',
   port: parseInt(process.env.SMTP_PORT, 10) || 587,
   user: process.env.SMTP_USER || '',
   pass: process.env.SMTP_PASS || '',
-  from: process.env.MAIL_FROM || 'Fitrybe <no-reply@fitrybe.app>',
 };
-mail.enabled = Boolean(mail.host && mail.user && mail.pass);
+
+mail.smtpConfigured = Boolean(mail.host && mail.user && mail.pass);
+mail.provider = mail.resendApiKey ? 'resend' : (mail.smtpConfigured ? 'smtp' : 'none');
+mail.enabled = mail.provider !== 'none';
 
 // Without it there is no way to deliver a reset code, so the endpoint reports
 // itself unavailable rather than accepting requests it cannot honour. Not
@@ -134,7 +144,7 @@ mail.enabled = Boolean(mail.host && mail.user && mail.pass);
 if (!mail.enabled && nodeEnv === 'production') {
   console.error(
     '[fitrybe] Email is NOT configured — password reset will answer 503. ' +
-      'Set SMTP_HOST, SMTP_USER and SMTP_PASS to enable it.'
+      'Set RESEND_API_KEY, or SMTP_HOST/SMTP_USER/SMTP_PASS.'
   );
 }
 

@@ -2,96 +2,106 @@ const nodemailer = require('nodemailer');
 const env = require('../config/env');
 
 /**
- * Sends transactional email over SMTP.
+ * Sends transactional email, over HTTPS where possible and SMTP where not.
  *
- * SMTP rather than a particular vendor's API on purpose: Resend, SendGrid, SES,
- * Postmark and an ordinary mailbox all speak it, so switching provider is four
- * environment variables and no code.
+ * HTTPS is the default for a reason learned the hard way: hosting platforms
+ * routinely block outbound SMTP so their address space cannot be used to send
+ * spam. The failure is a bare TCP connect timeout, which reads like broken
+ * credentials but is the port never opening. A provider's HTTP API goes out on
+ * 443 alongside every other request the server makes, so there is no port to
+ * be blocked.
+ *
+ * SMTP is kept for anywhere it does work, and for pointing at a local catcher
+ * in development.
  */
 
-// Built once. A transport per message would open a new TLS connection for every
-// send, which is both slow and a good way to get rate-limited by the provider.
+const RESEND_ENDPOINT = 'https://api.resend.com/emails';
+
+// Built once. A transport per message opens a new TLS connection every time.
 let transport = null;
 
-const dns = require('dns');
-if (dns.setDefaultResultOrder) {
-  dns.setDefaultResultOrder('ipv4first');
-}
-
-function isResendKey(key) {
-  return typeof key === 'string' && key.startsWith('re_');
-}
-
-async function sendViaResendHttp(apiKey, { to, subject, text, html }) {
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from: env.mail.from,
-      to: Array.isArray(to) ? to : [to],
-      subject,
-      text,
-      html,
-    }),
-  });
-  if (!res.ok) {
-    const errorBody = await res.json().catch(() => ({}));
-    throw new Error(errorBody.message || `Resend API error: ${res.statusText}`);
-  }
-  return res.json();
-}
-
-function getTransport() {
-  if (!env.mail.enabled || isResendKey(env.mail.pass)) return null;
+function smtpTransport() {
   transport ??= nodemailer.createTransport({
-    host: env.mail.host || 'smtp.gmail.com',
-    port: env.mail.port || 465,
+    host: env.mail.host,
+    port: env.mail.port,
+    // 465 is implicit TLS; everything else starts plaintext and upgrades.
     secure: env.mail.port === 465,
     auth: { user: env.mail.user, pass: env.mail.pass },
-    tls: {
-      rejectUnauthorized: false,
-      servername: env.mail.host || 'smtp.gmail.com',
-    },
-    lookup: (hostname, options, callback) => {
-      dns.lookup(hostname, { family: 4, all: false }, (err, address, family) => {
-        callback(err, address, 4);
-      });
-    },
+    // Fail fast. The default lets a blocked port hang for minutes, which turns
+    // one unreachable host into a pile of stuck requests.
     connectionTimeout: 10000,
     greetingTimeout: 10000,
-    socketTimeout: 15000,
+    socketTimeout: 20000,
   });
   return transport;
 }
 
 /** Whether email can actually be delivered right now. */
 function canSend() {
-  return env.mail.enabled || isResendKey(process.env.RESEND_API_KEY || env.mail.pass);
+  return env.mail.enabled;
 }
 
-async function send({ to, subject, text, html }) {
-  const resendKey = process.env.RESEND_API_KEY || (isResendKey(env.mail.pass) ? env.mail.pass : null);
-  if (resendKey) {
-    return sendViaResendHttp(resendKey, { to, subject, text, html });
-  }
+/** Which way mail is going out: 'resend', 'smtp', or 'none'. */
+function provider() {
+  return env.mail.provider;
+}
 
-  const mailer = getTransport();
-  if (!mailer) {
-    throw new Error('Email is not configured');
+async function sendViaResend({ to, subject, text, html }) {
+  const res = await fetch(RESEND_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${env.mail.resendApiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ from: env.mail.from, to: [to], subject, text, html }),
+  });
+
+  if (!res.ok) {
+    // The body names the actual problem — an unverified sending domain, most
+    // often — and saying so beats a bare status code.
+    const detail = await res.text();
+    throw new Error(`Resend responded ${res.status}: ${detail.slice(0, 300)}`);
   }
-  await mailer.sendMail({ from: env.mail.from, to, subject, text, html });
+}
+
+async function sendViaSmtp({ to, subject, text, html }) {
+  try {
+    await smtpTransport().sendMail({
+      from: env.mail.from,
+      to,
+      subject,
+      text,
+      html,
+    });
+  } catch (err) {
+    if (err.code === 'ETIMEDOUT' || err.code === 'ECONNREFUSED') {
+      throw new Error(
+        `Could not reach ${env.mail.host}:${env.mail.port} (${err.code}). ` +
+          'Hosting platforms commonly block outbound SMTP; set RESEND_API_KEY ' +
+          'to send over HTTPS instead.'
+      );
+    }
+    throw err;
+  }
+}
+
+async function send(message) {
+  switch (env.mail.provider) {
+    case 'resend':
+      return sendViaResend(message);
+    case 'smtp':
+      return sendViaSmtp(message);
+    default:
+      throw new Error('Email is not configured');
+  }
 }
 
 /**
  * The password reset code.
  *
  * Plain text carries the code as well as the HTML, because a mail client set to
- * plain text would otherwise show an empty message. The wording deliberately
- * avoids saying whether an account exists beyond what the recipient can already
- * see, and tells someone who did not ask that ignoring it is enough.
+ * plain text would otherwise show an empty message. The wording tells someone
+ * who did not ask for this that ignoring it is enough.
  */
 async function sendPasswordResetCode({ to, code, minutes }) {
   const subject = 'Your Fitrybe password reset code';
@@ -121,4 +131,4 @@ async function sendPasswordResetCode({ to, code, minutes }) {
   await send({ to, subject, text, html });
 }
 
-module.exports = { canSend, send, sendPasswordResetCode };
+module.exports = { canSend, provider, send, sendPasswordResetCode };
