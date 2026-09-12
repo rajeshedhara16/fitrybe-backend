@@ -5,6 +5,7 @@ const { deleteByUrls } = require('../services/storage');
 const { createNotification } = require('../utils/notify');
 const bcrypt = require('bcryptjs');
 const appleTokens = require('../services/appleTokens');
+const { verifyIdentityToken } = require('../services/socialIdentity');
 
 async function getUserById(req, res) {
   const user = await prisma.user.findUnique({ where: { id: req.params.userId } });
@@ -44,6 +45,10 @@ async function searchUsers(req, res) {
     where: {
       // Never surface the caller to themselves in search or suggestions.
       id: { not: req.userId },
+      // Opting out of discovery keeps someone out of search and suggestions.
+      // It does not make the profile private: anyone holding a direct link
+      // still sees it, and this endpoint is the only place it applies.
+      discoverable: true,
       ...(term
         ? {
             OR: [
@@ -268,8 +273,156 @@ async function deleteMe(req, res) {
   res.status(204).send();
 }
 
+const PROVIDER_LABELS = { GOOGLE: 'Google', APPLE: 'Apple' };
+
+/**
+ * Every way this account can be signed in to.
+ *
+ * The provider ids themselves are not returned. They identify the person to the
+ * provider and the screen has no use for them; what it needs is which buttons
+ * work and whether unlinking one would lock the athlete out.
+ */
+async function listIdentities(req, res) {
+  const [user, identities] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: req.userId },
+      select: { email: true, passwordHash: true },
+    }),
+    prisma.authIdentity.findMany({
+      where: { userId: req.userId },
+      select: { provider: true, email: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    }),
+  ]);
+  if (!user) {
+    throw new AppError(404, 'User not found');
+  }
+
+  const hasPassword = Boolean(user.passwordHash);
+  // Removing the last way in would strand the account. One method left means
+  // that method is not removable, and the screen greys it out rather than
+  // offering an action that can only fail.
+  const methodCount = identities.length + (hasPassword ? 1 : 0);
+
+  res.json({
+    email: user.email,
+    hasPassword,
+    identities: identities.map((i) => ({
+      provider: i.provider,
+      label: PROVIDER_LABELS[i.provider] || i.provider,
+      email: i.email,
+      connectedAt: i.createdAt,
+      canDisconnect: methodCount > 1,
+    })),
+  });
+}
+
+/**
+ * Attaches another provider to the account already signed in.
+ *
+ * Deliberately not the sign-in path. That one resolves an identity to whichever
+ * account owns the address, which is right when nobody is signed in and wrong
+ * here: this must attach to *the caller*, whatever address the provider
+ * reports. Someone whose Google address differs from their Fitrybe one is
+ * linking accounts, not proving who they are.
+ */
+async function linkIdentity(req, res) {
+  const { provider, idToken, authorizationCode } = req.body;
+  const identity = await verifyIdentityToken(provider, idToken);
+
+  const existing = await prisma.authIdentity.findUnique({
+    where: {
+      provider_providerUserId: {
+        provider: identity.provider,
+        providerUserId: identity.providerUserId,
+      },
+    },
+    select: { userId: true },
+  });
+
+  if (existing && existing.userId !== req.userId) {
+    // Moving it would silently take a sign-in method away from the other
+    // account, which might be that person's only one.
+    throw new AppError(
+      409,
+      `That ${PROVIDER_LABELS[identity.provider]} account is already linked to a different Fitrybe account`
+    );
+  }
+  if (existing) {
+    throw new AppError(409, `${PROVIDER_LABELS[identity.provider]} is already connected`);
+  }
+
+  let providerRefreshToken = null;
+  if (identity.provider === 'APPLE' && authorizationCode) {
+    providerRefreshToken =
+        await appleTokens.exchangeAuthorizationCode(authorizationCode);
+  }
+
+  await prisma.authIdentity.create({
+    data: {
+      userId: req.userId,
+      provider: identity.provider,
+      providerUserId: identity.providerUserId,
+      email: identity.email,
+      providerRefreshToken,
+    },
+  });
+
+  res.status(201).json({ connected: true, provider: identity.provider });
+}
+
+/**
+ * Removes one way of signing in, refusing to remove the last one.
+ *
+ * Without that guard someone could unlink Google from an account that has no
+ * password and lock themselves out permanently, with no reset to fall back on
+ * because a reset needs a password to set.
+ */
+async function unlinkIdentity(req, res) {
+  const provider = `${req.params.provider}`.toUpperCase();
+
+  const [user, identities] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: req.userId },
+      select: { passwordHash: true },
+    }),
+    prisma.authIdentity.findMany({
+      where: { userId: req.userId },
+      select: { id: true, provider: true, providerRefreshToken: true },
+    }),
+  ]);
+  if (!user) {
+    throw new AppError(404, 'User not found');
+  }
+
+  const target = identities.find((i) => i.provider === provider);
+  if (!target) {
+    throw new AppError(404, 'That account is not connected');
+  }
+
+  const methodCount = identities.length + (user.passwordHash ? 1 : 0);
+  if (methodCount <= 1) {
+    throw new AppError(
+      400,
+      'This is the only way you can sign in. Set a password first, then disconnect it.'
+    );
+  }
+
+  // Tell Apple, so the app stops appearing in their sign-in settings as
+  // something still holding an authorization it no longer has.
+  if (provider === 'APPLE') {
+    await appleTokens.revokeToken(target.providerRefreshToken);
+  }
+
+  await prisma.authIdentity.delete({ where: { id: target.id } });
+  res.status(204).send();
+}
+
 module.exports = {
   getUserById,
+  listIdentities,
+  linkIdentity,
+  unlinkIdentity,
   deleteMe,
   searchUsers,
   updateMe,

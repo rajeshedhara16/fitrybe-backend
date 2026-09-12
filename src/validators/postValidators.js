@@ -5,7 +5,9 @@ const createPostSchema = z.object({
   // rejects a post that has neither text nor images.
   caption: z.string().trim().max(2200).optional().default(''),
   type: z.string().trim().min(1).max(40).default('Update'),
-  audience: z.enum(['EVERYONE', 'TRYBES']).default('EVERYONE'),
+  // Left undefined when unspecified, so the controller can apply the athlete's
+  // default audience rather than overriding it with EVERYONE.
+  audience: z.enum(['EVERYONE', 'TRYBES']).optional(),
   locationTag: z.string().trim().max(120).optional(),
   activityId: z.string().uuid().optional(),
 });

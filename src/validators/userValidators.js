@@ -15,6 +15,15 @@ const updateProfileSchema = z.object({
   weight: z.number().positive().optional(),
   targetWeight: z.number().positive().optional(),
   fitnessGoal: z.string().trim().max(120).optional(),
+  // Display preference only. Nothing stored is ever converted, so this cannot
+  // corrupt a logged workout however often it is flipped.
+  unitSystem: z.enum(['METRIC', 'IMPERIAL']).optional(),
+  // Privacy defaults. Each applies to what is created after it is set; nothing
+  // already logged or posted is ever revisited, so flipping one cannot
+  // retroactively expose or hide anything.
+  defaultActivityPublic: z.boolean().optional(),
+  defaultPostAudience: z.enum(['EVERYONE', 'TRYBES']).optional(),
+  discoverable: z.boolean().optional(),
   stepTarget: z.number().int().positive().optional(),
   weeklyDistanceTarget: z.number().positive().optional(),
   caloriesTarget: z.number().int().positive().optional(),
@@ -43,4 +52,17 @@ const deleteAccountSchema = z.object({
   password: z.string().min(1).max(72).optional(),
 });
 
-module.exports = { updateProfileSchema, userSearchSchema, deleteAccountSchema };
+// Linking a provider to the account already signed in. Same shape as the
+// sign-in body minus the name fields: a link never renames anyone.
+const linkIdentitySchema = z.object({
+  provider: z.enum(['GOOGLE', 'APPLE']),
+  idToken: z.string().min(1).max(8192),
+  authorizationCode: z.string().trim().min(1).max(2048).optional(),
+});
+
+module.exports = {
+  updateProfileSchema,
+  userSearchSchema,
+  deleteAccountSchema,
+  linkIdentitySchema,
+};

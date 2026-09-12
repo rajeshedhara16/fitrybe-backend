@@ -14,9 +14,22 @@ async function logActivity(req, res) {
     routeData,
     startTime,
     endTime,
-    isPublic = true,
+    isPublic,
     createPost = false,
   } = req.body;
+
+  // Read once, used for both the activity and the post it may spawn. Only
+  // consulted when the client said nothing: an explicit choice on the recording
+  // screen always wins over the account default.
+  const owner =
+    isPublic === undefined || createPost
+      ? await prisma.user.findUnique({
+          where: { id: req.userId },
+          select: { defaultActivityPublic: true, defaultPostAudience: true },
+        })
+      : null;
+
+  const visible = isPublic ?? owner?.defaultActivityPublic ?? true;
 
   // Compute avgPace (min/km) if distance > 0 and not provided
   let computedPace = avgPace;
@@ -40,7 +53,7 @@ async function logActivity(req, res) {
       routeData,
       startTime: startTime || new Date(),
       endTime,
-      isPublic,
+      isPublic: visible,
     },
     include: {
       user: {
@@ -60,7 +73,10 @@ async function logActivity(req, res) {
         authorId: req.userId,
         caption,
         type: 'Activity',
-        audience: 'EVERYONE',
+        // Follows the athlete's default rather than always going out to
+        // everyone. Someone who posts to their Trybes by choice should not be
+        // published wider by the share toggle on the recorder.
+        audience: owner?.defaultPostAudience || 'EVERYONE',
         activityId: activity.id,
       },
     });

@@ -631,7 +631,52 @@ knows the athlete's timezone. A run at 1am belongs to that day where they live.
 - **List Followers**: `GET /api/users/:userId/followers`
 - **List Following**: `GET /api/users/:userId/following`
 
-#### 4. Delete Account
+#### 3. Privacy Defaults
+Three fields on the user, set through `PATCH /api/users/me` like any other
+profile field, and enforced by the server rather than by the client.
+
+| Field | Values | Effect |
+| --- | --- | --- |
+| `defaultActivityPublic` | boolean | Visibility applied when a workout is logged without an explicit `isPublic` |
+| `defaultPostAudience` | `EVERYONE` \| `TRYBES` | Audience applied when a post is created without an explicit `audience` |
+| `discoverable` | boolean | Whether the athlete appears in `GET /api/users/search` |
+
+- **An explicit value always wins.** Sending `isPublic` or `audience` overrides
+  the default in both directions, so a per-workout or per-post choice is never
+  silently reversed.
+- **Send nothing to get the default.** The validators no longer coerce a missing
+  value to `true` or `EVERYONE`, precisely so the controller can tell an
+  explicit choice from silence.
+- **Nothing already stored is revisited.** Changing a default affects only what
+  is created afterwards, so it can never retroactively expose or hide anything.
+- `discoverable` is search visibility, not a private account. Someone with a
+  direct link still loads the profile through `GET /api/users/:userId`.
+- The auto-shared post created by `createPost` on an activity follows
+  `defaultPostAudience` too, rather than always going out to everyone.
+
+#### 4. Connected Sign-in Methods
+- **List**: `GET /api/users/me/identities`
+  - Returns `email`, `hasPassword`, and an `identities` array of
+    `{ provider, label, email, connectedAt, canDisconnect }`.
+  - The provider's own user id is never returned. The screen has no use for it.
+  - `canDisconnect` is false when that method is the only way into the account.
+    Grey the control out rather than offering an action that must fail.
+- **Connect**: `POST /api/users/me/identities`
+  - Body: `{ "provider": "GOOGLE"|"APPLE", "idToken": "...", "authorizationCode": "..." }`
+  - **Not the same as `POST /api/auth/social`.** That one resolves an identity to
+    whichever account owns the address, which is correct when nobody is signed
+    in. This one attaches to *the caller*, whatever address the provider reports,
+    because someone linking a Google address that differs from their Fitrybe one
+    is linking accounts, not proving who they are.
+  - 409 if that provider identity already belongs to a different account, or is
+    already connected to this one.
+- **Disconnect**: `DELETE /api/users/me/identities/:provider`
+  - 204 on success. 400 if it is the last remaining sign-in method, since
+    removing it would lock the account permanently: a password reset cannot help
+    an account with no password. 404 if it was never connected.
+  - Disconnecting Apple revokes the tokens with Apple as well.
+
+#### 5. Delete Account
 - **Method & Path**: `DELETE /api/users/me`
 - Body: `{ "password": "..." }` for an account that has one; send nothing for an
   account reached only through Google or Apple. `hasPassword` on the user says

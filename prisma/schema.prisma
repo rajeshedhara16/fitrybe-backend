@@ -14,6 +14,13 @@ enum Gender {
   PREFER_NOT_TO_SAY
 }
 
+/// How measurements are shown to one athlete. Display only: everything is
+/// stored in metric regardless, so switching never rewrites any data.
+enum UnitSystem {
+  METRIC
+  IMPERIAL
+}
+
 enum PostAudience {
   EVERYONE
   TRYBES
@@ -62,8 +69,8 @@ enum NotificationType {
 }
 
 model User {
-  id                   String    @id @default(uuid())
-  email                String    @unique
+  id                   String     @id @default(uuid())
+  email                String     @unique
   // Null for an account created through Google or Apple, which never sets one.
   // Password sign-in and password change both refuse such an account rather
   // than handing null to bcrypt.
@@ -76,21 +83,40 @@ model User {
   avatarUrl            String?
   bannerUrl            String?
   location             String?
-  activityInterests    String[]  @default([])
-  sportInterests       String[]  @default([])
+  activityInterests    String[]   @default([])
+  sportInterests       String[]   @default([])
   height               Float?
   weight               Float?
   targetWeight         Float?
   fitnessGoal          String?
-  stepTarget           Int?      @default(10000)
-  weeklyDistanceTarget Float?    @default(25.0)
-  caloriesTarget       Int?      @default(500)
-  onboardingCompleted  Boolean   @default(false)
+  stepTarget           Int?       @default(10000)
+  weeklyDistanceTarget Float?     @default(25.0)
+  caloriesTarget       Int?       @default(500)
+  onboardingCompleted  Boolean    @default(false)
+  /// Kilometres or miles, and everything that follows from that choice. Lives
+  /// on the account rather than the device so it follows the athlete, and is
+  /// never applied to stored values.
+  unitSystem           UnitSystem @default(METRIC)
+
+  /// Applied when a workout is logged without saying either way. A private
+  /// activity is visible only to the athlete who recorded it. Changing this
+  /// never touches anything already logged: each activity keeps the visibility
+  /// it was saved with, so a setting change cannot retroactively expose or
+  /// hide months of training.
+  defaultActivityPublic Boolean @default(true)
+
+  /// Applied when a post is created without an explicit audience.
+  defaultPostAudience PostAudience @default(EVERYONE)
+
+  /// Whether this athlete turns up in people search. Off does not make the
+  /// profile private — someone with a direct link still sees it — it only
+  /// stops them being suggested to strangers.
+  discoverable Boolean  @default(true)
   // Bumped on logout and password change; a refresh token carrying an older
   // version is rejected, which is what makes those actions revoke sessions.
-  tokenVersion         Int       @default(0)
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  tokenVersion Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   posts                  Post[]
   comments               Comment[]

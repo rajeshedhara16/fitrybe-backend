@@ -112,9 +112,20 @@ async function createPost(req, res) {
     throw new AppError(400, 'Add a caption or at least one photo to post');
   }
 
+  // Only when the composer said nothing. Picking an audience there always wins.
+  let audience = req.body.audience;
+  if (audience === undefined) {
+    const author = await prisma.user.findUnique({
+      where: { id: req.userId },
+      select: { defaultPostAudience: true },
+    });
+    audience = author?.defaultPostAudience || 'EVERYONE';
+  }
+
   const post = await prisma.post.create({
     data: {
       ...req.body,
+      audience,
       imageUrls,
       authorId: req.userId,
     },
