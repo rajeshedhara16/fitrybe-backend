@@ -98,12 +98,12 @@ model User {
   /// never applied to stored values.
   unitSystem           UnitSystem @default(METRIC)
 
-  /// Applied when a workout is logged without saying either way. A private
-  /// activity is visible only to the athlete who recorded it. Changing this
-  /// never touches anything already logged: each activity keeps the visibility
-  /// it was saved with, so a setting change cannot retroactively expose or
-  /// hide months of training.
-  defaultActivityPublic Boolean @default(true)
+  /// Whether anyone else can see this athlete's workouts at all, past and
+  /// future. Checked every time someone else reads them rather than written
+  /// onto each workout, so hiding a profile covers its whole history and
+  /// showing it again restores exactly what was visible before, including
+  /// individual workouts that were already private.
+  activitiesVisible Boolean @default(true)
 
   /// Applied when a post is created without an explicit audience.
   defaultPostAudience PostAudience @default(EVERYONE)

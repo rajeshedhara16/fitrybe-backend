@@ -13,11 +13,21 @@ async function getUserById(req, res) {
     throw new AppError(404, 'User not found');
   }
 
+  // The workout count follows the same rule as the workouts themselves. It
+  // used to count everything, so a profile revealed how many private runs it
+  // held even though none of them could be opened.
+  const isSelf = req.userId === user.id;
+  const activityWhere = isSelf
+    ? { userId: user.id }
+    : user.activitiesVisible === false
+      ? { userId: user.id, id: { in: [] } }
+      : { userId: user.id, isPublic: true };
+
   const [followerCount, followingCount, postCount, activityCount] = await Promise.all([
     prisma.follow.count({ where: { followingId: user.id } }),
     prisma.follow.count({ where: { followerId: user.id } }),
     prisma.post.count({ where: { authorId: user.id } }),
-    prisma.activity.count({ where: { userId: user.id } }),
+    prisma.activity.count({ where: activityWhere }),
   ]);
 
   let isFollowing = false;

@@ -50,4 +50,45 @@ async function canViewPost(viewerId, post) {
   return !!shared;
 }
 
-module.exports = { trybeIdsFor, postVisibilityFilter, canViewPost };
+/**
+ * What another person may see of someone's workouts: public ones, and only
+ * while the owner's profile is visible at all.
+ *
+ * Checked at read time rather than written onto each workout. Hiding a profile
+ * therefore covers its whole history, and showing it again restores exactly
+ * what was visible before, individually private workouts included, because
+ * nothing stored was ever changed.
+ *
+ * For queries about someone other than the viewer. A viewer's own workouts are
+ * never filtered.
+ */
+const ACTIVITIES_VISIBLE_TO_OTHERS = Object.freeze({
+  isPublic: true,
+  user: { activitiesVisible: true },
+});
+
+/** Whether the owner lets anyone else see their workouts at all. */
+async function profileActivitiesVisible(userId) {
+  const owner = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { activitiesVisible: true },
+  });
+  return owner?.activitiesVisible !== false;
+}
+
+/** Single-workout form of [ACTIVITIES_VISIBLE_TO_OTHERS]. */
+async function canViewActivity(viewerId, activity) {
+  if (!activity) return false;
+  if (activity.userId === viewerId) return true;
+  if (!activity.isPublic) return false;
+  return profileActivitiesVisible(activity.userId);
+}
+
+module.exports = {
+  trybeIdsFor,
+  postVisibilityFilter,
+  canViewPost,
+  ACTIVITIES_VISIBLE_TO_OTHERS,
+  profileActivitiesVisible,
+  canViewActivity,
+};

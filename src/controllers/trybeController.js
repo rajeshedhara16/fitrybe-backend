@@ -185,8 +185,9 @@ async function getLeaderboard(req, res) {
           firstName: true,
           lastName: true,
           avatarUrl: true,
+          activitiesVisible: true,
           activities: {
-            select: { distance: true, duration: true, calories: true },
+            select: { distance: true, duration: true, calories: true, isPublic: true },
           },
         },
       },
@@ -194,9 +195,18 @@ async function getLeaderboard(req, res) {
   });
 
   const leaderboard = members.map((m) => {
-    const totalDistanceMeters = m.user.activities.reduce((acc, a) => acc + (a.distance || 0), 0);
+    // Your own row counts everything you logged. Anyone else's counts only
+    // what they let others see. This used to sum every workout regardless,
+    // so private runs quietly showed up on a shared leaderboard.
+    const counted =
+      m.user.id === req.userId
+        ? m.user.activities
+        : m.user.activitiesVisible
+          ? m.user.activities.filter((a) => a.isPublic)
+          : [];
+    const totalDistanceMeters = counted.reduce((acc, a) => acc + (a.distance || 0), 0);
     const totalDistanceKm = parseFloat((totalDistanceMeters / 1000).toFixed(1));
-    const workoutCount = m.user.activities.length;
+    const workoutCount = counted.length;
 
     return {
       userId: m.user.id,

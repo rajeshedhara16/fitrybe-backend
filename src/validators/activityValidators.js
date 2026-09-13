@@ -12,10 +12,9 @@ const logActivitySchema = z.object({
   routeData: z.any().optional(),
   startTime: z.coerce.date().optional(),
   endTime: z.coerce.date().optional(),
-  // No default here on purpose. A missing value has to stay missing so the
-  // controller can fall back to the athlete's own privacy setting; defaulting
-  // to true here would quietly publish every workout of anyone who set
-  // theirs to private.
+  // Per-workout switch, stored public when absent. Whether anyone else sees
+  // the workout also depends on its owner's profile visibility, which is
+  // checked when it is read rather than copied onto it here.
   isPublic: z.boolean().optional(),
   createPost: z.boolean().optional().default(false),
 });

@@ -637,18 +637,20 @@ profile field, and enforced by the server rather than by the client.
 
 | Field | Values | Effect |
 | --- | --- | --- |
-| `defaultActivityPublic` | boolean | Visibility applied when a workout is logged without an explicit `isPublic` |
+| `activitiesVisible` | boolean | Whether anyone else can see this athlete's workouts at all, past and future |
 | `defaultPostAudience` | `EVERYONE` \| `TRYBES` | Audience applied when a post is created without an explicit `audience` |
 | `discoverable` | boolean | Whether the athlete appears in `GET /api/users/search` |
 
-- **An explicit value always wins.** Sending `isPublic` or `audience` overrides
-  the default in both directions, so a per-workout or per-post choice is never
-  silently reversed.
-- **Send nothing to get the default.** The validators no longer coerce a missing
-  value to `true` or `EVERYONE`, precisely so the controller can tell an
-  explicit choice from silence.
-- **Nothing already stored is revisited.** Changing a default affects only what
-  is created afterwards, so it can never retroactively expose or hide anything.
+- **`activitiesVisible` covers the whole history.** It is checked whenever
+  someone else reads a workout, not written onto each one. Turning it off hides
+  every workout the athlete has ever logged from activity lists, single-workout
+  reads, analytics, the profile's workout count and Trybe leaderboards. Turning
+  it back on restores exactly what was visible before, including workouts that
+  were individually private, because nothing stored changes.
+- **The owner always sees everything.** None of these rules apply to your own
+  workouts.
+- **`defaultPostAudience` applies to new posts only.** Sending `audience` on a
+  post overrides it, and posts already shared keep the audience they were given.
 - `discoverable` is search visibility, not a private account. Someone with a
   direct link still loads the profile through `GET /api/users/:userId`.
 - The auto-shared post created by `createPost` on an activity follows

@@ -1,5 +1,10 @@
 const prisma = require('../config/prisma');
 const AppError = require('../utils/AppError');
+const {
+  ACTIVITIES_VISIBLE_TO_OTHERS,
+  profileActivitiesVisible,
+  canViewActivity,
+} = require('../utils/visibility');
 
 async function logActivity(req, res) {
   const {
@@ -18,18 +23,17 @@ async function logActivity(req, res) {
     createPost = false,
   } = req.body;
 
-  // Read once, used for both the activity and the post it may spawn. Only
-  // consulted when the client said nothing: an explicit choice on the recording
-  // screen always wins over the account default.
-  const owner =
-    isPublic === undefined || createPost
-      ? await prisma.user.findUnique({
-          where: { id: req.userId },
-          select: { defaultActivityPublic: true, defaultPostAudience: true },
-        })
-      : null;
+  // Only the post audience needs the account read at logging time. Whether
+  // anyone else sees this workout is decided when it is read, by the owner's
+  // profile visibility, so it is stored public unless explicitly made private.
+  const owner = createPost
+    ? await prisma.user.findUnique({
+        where: { id: req.userId },
+        select: { defaultPostAudience: true },
+      })
+    : null;
 
-  const visible = isPublic ?? owner?.defaultActivityPublic ?? true;
+  const visible = isPublic ?? true;
 
   // Compute avgPace (min/km) if distance > 0 and not provided
   let computedPace = avgPace;
@@ -96,8 +100,9 @@ async function listActivities(req, res) {
 
   const whereClause = {
     userId: targetUserId,
-    // A private activity is only ever visible to the athlete who logged it.
-    ...(isSelf ? {} : { isPublic: true }),
+    // Someone else's list holds only what they let others see, which takes
+    // both the workout being public and their profile being visible.
+    ...(isSelf ? {} : ACTIVITIES_VISIBLE_TO_OTHERS),
     ...(type ? { type } : {}),
   };
 
@@ -132,8 +137,9 @@ async function getActivity(req, res) {
     throw new AppError(404, 'Activity not found');
   }
 
-  // Don't confirm that a private activity exists to anyone but its owner.
-  if (!activity.isPublic && activity.userId !== req.userId) {
+  // Don't confirm that a hidden activity exists to anyone but its owner,
+  // whether it is hidden on its own or because its owner hid their profile.
+  if (!(await canViewActivity(req.userId, activity))) {
     throw new AppError(404, 'Activity not found');
   }
 
@@ -159,9 +165,16 @@ async function getAnalytics(req, res) {
   const { userId } = req.validatedQuery;
   const targetUserId = userId || req.userId;
   const isSelf = targetUserId === req.userId;
-  // Another athlete's figures are built from their public activities only;
-  // your own include everything you logged.
-  const scope = { userId: targetUserId, ...(isSelf ? {} : { isPublic: true }) };
+  // Your own figures include everything you logged. Another athlete's come
+  // from their public workouts, and from nothing at all if they hid their
+  // profile, in which case every query below matches no rows and the reply
+  // has the same zeroed shape as a brand new account's.
+  const hidden = !isSelf && !(await profileActivitiesVisible(targetUserId));
+  const scope = {
+    userId: targetUserId,
+    ...(isSelf ? {} : { isPublic: true }),
+    ...(hidden ? { id: { in: [] } } : {}),
+  };
 
   const now = new Date();
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);

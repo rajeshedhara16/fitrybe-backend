@@ -18,10 +18,10 @@ const updateProfileSchema = z.object({
   // Display preference only. Nothing stored is ever converted, so this cannot
   // corrupt a logged workout however often it is flipped.
   unitSystem: z.enum(['METRIC', 'IMPERIAL']).optional(),
-  // Privacy defaults. Each applies to what is created after it is set; nothing
-  // already logged or posted is ever revisited, so flipping one cannot
-  // retroactively expose or hide anything.
-  defaultActivityPublic: z.boolean().optional(),
+  // Whether anyone else sees this athlete's workouts at all, their whole
+  // history included. Enforced when workouts are read, not stored on them.
+  activitiesVisible: z.boolean().optional(),
+  // Applies to new posts only; posts already shared keep their audience.
   defaultPostAudience: z.enum(['EVERYONE', 'TRYBES']).optional(),
   discoverable: z.boolean().optional(),
   stepTarget: z.number().int().positive().optional(),
