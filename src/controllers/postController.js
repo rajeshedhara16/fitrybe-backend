@@ -305,6 +305,8 @@ async function createComment(req, res) {
       title: parent ? 'New Reply' : 'New Comment',
       body: `${parent ? 'replied' : 'commented'}: "${req.body.text.substring(0, 40)}"`,
       entityId: post.id,
+      // The new comment itself, so the notification opens straight onto it.
+      commentId: comment.id,
     });
   }
 
@@ -342,6 +344,7 @@ async function likeComment(req, res) {
       title: 'New Like',
       body: 'liked your comment.',
       entityId: comment.postId,
+      commentId: comment.id,
     });
   }
 

@@ -283,9 +283,19 @@ async function joinTrybe(req, res) {
   if (!trybe) {
     throw new AppError(404, 'Trybe not found');
   }
-  // Only public Trybes are self-join; a private one has to invite you.
+  // Public Trybes are open to anyone. A private one admits its creator and the
+  // people invited to it. The invite notification is the record of that
+  // invitation: only a member can create one, so holding one is proof enough,
+  // and ignoring the invite deletes it, which withdraws the right to join.
+  // Without this check an invited athlete could never join a private Trybe.
   if (!trybe.isPublic && trybe.creatorId !== req.userId) {
-    throw new AppError(403, 'This Trybe is invite-only');
+    const invite = await prisma.notification.findFirst({
+      where: { recipientId: req.userId, type: 'TRYBE_INVITE', entityId: trybe.id },
+      select: { id: true },
+    });
+    if (!invite) {
+      throw new AppError(403, 'This Trybe is invite-only');
+    }
   }
 
   await prisma.trybeMember.upsert({

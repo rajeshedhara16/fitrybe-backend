@@ -435,6 +435,10 @@ model Notification {
   title       String
   body        String
   entityId    String?
+  /// The specific comment a comment or comment-like notification is about,
+  /// so tapping it can land on that comment rather than the top of the post.
+  /// `entityId` still holds the post. Null for everything else.
+  commentId   String?
   isRead      Boolean          @default(false)
   createdAt   DateTime         @default(now())
 
