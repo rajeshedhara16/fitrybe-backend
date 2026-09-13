@@ -7,7 +7,9 @@ const { serializeActivitySummary } = require('../utils/serializers');
 
 const POST_INCLUDE = {
   author: {
-    select: { id: true, firstName: true, lastName: true, avatarUrl: true },
+    // `activitiesVisible` is read only to decide whether the attached workout
+    // may be shown, and is stripped before the post leaves the server.
+    select: { id: true, firstName: true, lastName: true, avatarUrl: true, activitiesVisible: true },
   },
   activity: true,
   _count: { select: { likes: true, comments: true } },
@@ -60,9 +62,23 @@ function commentInclude(viewerId, withReplies) {
 
 function serializePost(post, viewerId) {
   const { _count, likes, activity, ...rest } = post;
+  const { activitiesVisible, ...author } = rest.author || {};
+
+  // The post is a deliberate share with its own audience, so it stays. The
+  // workout attached to it does not, once its owner has hidden their workouts
+  // or that workout is private: otherwise every stat the profile setting hides
+  // would still be one tap away on an old post.
+  const hideWorkout = Boolean(
+    activity &&
+      post.authorId !== viewerId &&
+      (activitiesVisible === false || activity.isPublic === false)
+  );
+
   return {
     ...rest,
-    activity: serializeActivitySummary(activity),
+    ...(rest.author ? { author } : {}),
+    activity: hideWorkout ? null : serializeActivitySummary(activity),
+    activityHidden: hideWorkout,
     likeCount: _count ? _count.likes : 0,
     commentCount: _count ? _count.comments : 0,
     likedByMe: Array.isArray(likes) ? likes.some((l) => l.userId === viewerId) : false,
