@@ -21,6 +21,13 @@ enum UnitSystem {
   IMPERIAL
 }
 
+/// Where a workout was recorded. The recorder's own history shows only its
+/// workouts; clique workouts live with their session.
+enum ActivitySource {
+  RECORDED
+  CLIQUE
+}
+
 enum PostAudience {
   EVERYONE
   TRYBES
@@ -229,10 +236,20 @@ model Activity {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
+  /// Where it was recorded. Still counts everywhere else — analytics, goals,
+  /// streaks — since it is a real workout either way.
+  source          ActivitySource @default(RECORDED)
+  /// The clique session it was recorded in. Null for solo workouts, and kept
+  /// null rather than deleted if the session is later removed.
+  cliqueSession   CliqueSession? @relation(fields: [cliqueSessionId], references: [id], onDelete: SetNull)
+  cliqueSessionId String?
+
   posts Post[]
 
   @@index([userId])
   @@index([createdAt])
+  @@index([userId, source])
+  @@index([cliqueSessionId])
 }
 
 model Post {
@@ -399,6 +416,7 @@ model CliqueSession {
   updatedAt       DateTime     @updatedAt
 
   participants CliqueParticipant[]
+  activities   Activity[]
 
   @@index([creatorId])
   @@index([status])

@@ -21,7 +21,26 @@ async function logActivity(req, res) {
     endTime,
     isPublic,
     createPost = false,
+    cliqueSessionId,
   } = req.body;
+
+  // A clique workout has to belong to a session its athlete is actually in,
+  // or anyone could file workouts under someone else's clique.
+  if (cliqueSessionId) {
+    const session = await prisma.cliqueSession.findUnique({
+      where: { id: cliqueSessionId },
+      select: { creatorId: true },
+    });
+    const participant = session
+      ? await prisma.cliqueParticipant.findUnique({
+          where: { sessionId_userId: { sessionId: cliqueSessionId, userId: req.userId } },
+          select: { id: true },
+        })
+      : null;
+    if (!session || (session.creatorId !== req.userId && !participant)) {
+      throw new AppError(403, 'You are not part of that clique session');
+    }
+  }
 
   // Only the post audience needs the account read at logging time. Whether
   // anyone else sees this workout is decided when it is read, by the owner's
@@ -58,6 +77,8 @@ async function logActivity(req, res) {
       startTime: startTime || new Date(),
       endTime,
       isPublic: visible,
+      source: cliqueSessionId ? 'CLIQUE' : 'RECORDED',
+      cliqueSessionId: cliqueSessionId || null,
     },
     include: {
       user: {
@@ -90,7 +111,7 @@ async function logActivity(req, res) {
 }
 
 async function listActivities(req, res) {
-  const { userId, type, cursor, limit } = req.validatedQuery;
+  const { userId, type, source, cursor, limit } = req.validatedQuery;
 
   // Asking for no one in particular means asking for yourself. This used to
   // fall through to every athlete's public activities, so the recorder's
@@ -104,6 +125,7 @@ async function listActivities(req, res) {
     // both the workout being public and their profile being visible.
     ...(isSelf ? {} : ACTIVITIES_VISIBLE_TO_OTHERS),
     ...(type ? { type } : {}),
+    ...(source ? { source } : {}),
   };
 
   const activities = await prisma.activity.findMany({

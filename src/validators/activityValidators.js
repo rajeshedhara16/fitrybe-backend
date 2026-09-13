@@ -17,11 +17,16 @@ const logActivitySchema = z.object({
   // checked when it is read rather than copied onto it here.
   isPublic: z.boolean().optional(),
   createPost: z.boolean().optional().default(false),
+  // Set only by the clique screen. Marks the workout as recorded in that
+  // session, which keeps it out of the solo recorder's history.
+  cliqueSessionId: z.string().uuid().optional(),
 });
 
 const listActivitiesQuerySchema = z.object({
   userId: z.string().uuid().optional(),
   type: z.string().trim().optional(),
+  // Narrows to where workouts were recorded; absent returns both.
+  source: z.enum(['RECORDED', 'CLIQUE']).optional(),
   cursor: z.string().uuid().optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
 });
