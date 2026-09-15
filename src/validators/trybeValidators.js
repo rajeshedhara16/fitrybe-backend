@@ -95,7 +95,13 @@ const listTrybesSchema = z.object({
   search: z.string().trim().max(120).optional(),
 });
 
+const inviteCandidatesQuerySchema = z.object({
+  search: z.string().trim().max(120).optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(25),
+});
+
 module.exports = {
+  inviteCandidatesQuerySchema,
   createTrybeSchema,
   updateTrybeSchema,
   listTrybesSchema,

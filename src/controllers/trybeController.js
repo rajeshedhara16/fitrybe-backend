@@ -578,6 +578,56 @@ async function inviteToTrybe(req, res) {
   res.status(201).json({ invited: true });
 }
 
+/**
+ * People a member could invite: discoverable athletes who are not already in
+ * the Trybe, each marked with whether an invite to it is still pending, so
+ * the app can show them as invited instead of offering a second invite.
+ */
+async function listInviteCandidates(req, res) {
+  const ctx = await loadTrybe(req.params.trybeId, req.userId);
+  requireRole(ctx, EVERY_ROLE, 'Join this Trybe before inviting others');
+  const { search, limit } = req.validatedQuery;
+
+  const members = await prisma.trybeMember.findMany({
+    where: { trybeId: ctx.trybe.id },
+    select: { userId: true },
+  });
+  const excluded = [req.userId, ctx.trybe.creatorId, ...members.map((m) => m.userId)].filter(Boolean);
+
+  const users = await prisma.user.findMany({
+    take: limit,
+    where: {
+      id: { notIn: excluded },
+      discoverable: true,
+      ...(search
+        ? {
+            OR: [
+              { firstName: { contains: search, mode: 'insensitive' } },
+              { lastName: { contains: search, mode: 'insensitive' } },
+              { location: { contains: search, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    },
+    orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+    select: { id: true, firstName: true, lastName: true, avatarUrl: true, location: true },
+  });
+
+  const pending = users.length === 0
+    ? []
+    : await prisma.notification.findMany({
+        where: {
+          type: 'TRYBE_INVITE',
+          entityId: ctx.trybe.id,
+          recipientId: { in: users.map((u) => u.id) },
+        },
+        select: { recipientId: true },
+      });
+  const invited = new Set(pending.map((n) => n.recipientId));
+
+  res.json({ users: users.map((u) => ({ ...u, invited: invited.has(u.id) })) });
+}
+
 // ── Events ──────────────────────────────────────────────────────────────────
 
 const EVENT_INCLUDE = {
@@ -777,6 +827,7 @@ module.exports = {
   joinTrybe,
   leaveTrybe,
   inviteToTrybe,
+  listInviteCandidates,
   listEvents,
   createEvent,
   updateEvent,

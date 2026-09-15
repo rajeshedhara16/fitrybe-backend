@@ -14,6 +14,7 @@ const {
   createEventSchema,
   updateEventSchema,
   eventsQuerySchema,
+  inviteCandidatesQuerySchema,
 } = require('../validators/trybeValidators');
 const { makeUploader } = require('../middleware/upload');
 
@@ -61,6 +62,11 @@ router.get('/:trybeId/posts', trybeController.getTrybePosts);
 router.post('/:trybeId/join', trybeController.joinTrybe);
 router.delete('/:trybeId/join', trybeController.leaveTrybe);
 router.post('/:trybeId/invite', validateBody(inviteSchema), trybeController.inviteToTrybe);
+router.get(
+  '/:trybeId/invite-candidates',
+  validateQuery(inviteCandidatesQuerySchema),
+  trybeController.listInviteCandidates
+);
 router.put('/:trybeId/mute', validateBody(muteSchema), trybeController.setMuted);
 
 router.get('/:trybeId/events', validateQuery(eventsQuerySchema), trybeController.listEvents);
