@@ -4,6 +4,7 @@ const { deleteByUrls } = require('../services/storage');
 const { createNotification } = require('../utils/notify');
 const { postVisibilityFilter } = require('../utils/visibility');
 const { serializePost, POST_INCLUDE } = require('./postController');
+const { blockedUserIds, isBlockedBetween } = require('../utils/blocks');
 
 /** Roles that run a Trybe day to day: edit it, schedule events, remove members. */
 const MANAGERS = ['CREATOR', 'CAPTAIN'];
@@ -439,6 +440,7 @@ async function getTrybePosts(req, res) {
     where: {
       AND: [
         { authorId: { in: trybeMembers.map((m) => m.userId) } },
+        { authorId: { notIn: await blockedUserIds(req.userId) } },
         { hiddenBy: { none: { userId: req.userId } } },
         isMember ? {} : await postVisibilityFilter(req.userId),
       ],
@@ -478,11 +480,12 @@ async function listMyTrybesFeed(req, res) {
     distinct: ['userId'],
   });
 
+  const blocked = new Set(await blockedUserIds(req.userId));
   const posts = await prisma.post.findMany({
     take: limit,
     ...(cursor && { skip: 1, cursor: { id: cursor } }),
     where: {
-      authorId: { in: authors.map((a) => a.userId) },
+      authorId: { in: authors.map((a) => a.userId).filter((id) => !blocked.has(id)) },
       hiddenBy: { none: { userId: req.userId } },
     },
     orderBy: { createdAt: 'desc' },
@@ -551,7 +554,7 @@ async function inviteToTrybe(req, res) {
   requireRole(ctx, EVERY_ROLE, 'Join this Trybe before inviting others');
 
   const invitee = await prisma.user.findUnique({ where: { id: userId } });
-  if (!invitee) {
+  if (!invitee || (await isBlockedBetween(req.userId, userId))) {
     throw new AppError(404, 'User not found');
   }
 
@@ -592,7 +595,12 @@ async function listInviteCandidates(req, res) {
     where: { trybeId: ctx.trybe.id },
     select: { userId: true },
   });
-  const excluded = [req.userId, ctx.trybe.creatorId, ...members.map((m) => m.userId)].filter(Boolean);
+  const excluded = [
+    req.userId,
+    ctx.trybe.creatorId,
+    ...members.map((m) => m.userId),
+    ...(await blockedUserIds(req.userId)),
+  ].filter(Boolean);
 
   const users = await prisma.user.findMany({
     take: limit,

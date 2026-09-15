@@ -151,6 +151,8 @@ model User {
   hiddenPosts            HiddenPost[]
   trybeEventsCreated     TrybeEvent[]         @relation("TrybeEventCreator")
   trybeEventRsvps        TrybeEventRsvp[]
+  blocksMade             UserBlock[]          @relation("BlockerRelation")
+  blockedBy              UserBlock[]          @relation("BlockedRelation")
 }
 
 /// A member's report that a post breaks the rules. One per person per post, so
@@ -523,6 +525,21 @@ model CliqueParticipant {
 
   @@unique([sessionId, userId])
   @@index([userId])
+}
+
+/// One athlete blocking another. Works both ways once it exists: neither sees
+/// the other's posts, comments or profile, and neither can follow, message or
+/// notify the other. Only the blocker can lift it.
+model UserBlock {
+  id        String   @id @default(uuid())
+  blocker   User     @relation("BlockerRelation", fields: [blockerId], references: [id], onDelete: Cascade)
+  blockerId String
+  blocked   User     @relation("BlockedRelation", fields: [blockedId], references: [id], onDelete: Cascade)
+  blockedId String
+  createdAt DateTime @default(now())
+
+  @@unique([blockerId, blockedId])
+  @@index([blockedId])
 }
 
 model Notification {

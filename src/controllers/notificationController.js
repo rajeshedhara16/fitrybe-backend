@@ -1,5 +1,6 @@
 const prisma = require('../config/prisma');
 const AppError = require('../utils/AppError');
+const { blockedUserIds } = require('../utils/blocks');
 
 async function listNotifications(req, res) {
   const { unreadOnly, cursor, limit } = req.validatedQuery;
@@ -9,6 +10,9 @@ async function listNotifications(req, res) {
     ...(cursor && { skip: 1, cursor: { id: cursor } }),
     where: {
       recipientId: req.userId,
+      // Anything from someone on the other side of a block stays out of sight.
+      // A null actor has to be allowed explicitly, since NOT IN never matches null.
+      OR: [{ actorId: null }, { actorId: { notIn: await blockedUserIds(req.userId) } }],
       ...(unreadOnly ? { isRead: false } : {}),
     },
     orderBy: { createdAt: 'desc' },

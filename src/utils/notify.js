@@ -1,5 +1,6 @@
 const prisma = require('../config/prisma');
 const { emitToUser } = require('../sockets');
+const { isBlockedBetween } = require('./blocks');
 
 /**
  * Creates a notification and pushes it to the recipient's devices along with
@@ -7,6 +8,12 @@ const { emitToUser } = require('../sockets');
  * app having to poll.
  */
 async function createNotification(data) {
+  // Nobody hears from someone they blocked, or who blocked them. Checked here
+  // so every kind of notification obeys it without each caller remembering.
+  if (data.actorId && (await isBlockedBetween(data.actorId, data.recipientId))) {
+    return null;
+  }
+
   const notification = await prisma.notification.create({
     data,
     include: {

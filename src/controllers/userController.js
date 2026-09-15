@@ -6,11 +6,42 @@ const { createNotification } = require('../utils/notify');
 const bcrypt = require('bcryptjs');
 const appleTokens = require('../services/appleTokens');
 const { verifyIdentityToken } = require('../services/socialIdentity');
+const { blockedUserIds, isBlockedBetween } = require('../utils/blocks');
 
 async function getUserById(req, res) {
   const user = await prisma.user.findUnique({ where: { id: req.params.userId } });
   if (!user) {
     throw new AppError(404, 'User not found');
+  }
+
+  // Someone who blocked the caller does not exist as far as the caller can
+  // tell. Someone the caller blocked shows only enough to unblock them.
+  if (req.userId && req.userId !== user.id) {
+    const block = await prisma.userBlock.findFirst({
+      where: {
+        OR: [
+          { blockerId: req.userId, blockedId: user.id },
+          { blockerId: user.id, blockedId: req.userId },
+        ],
+      },
+      select: { blockerId: true },
+    });
+    if (block && block.blockerId === user.id) {
+      throw new AppError(404, 'User not found');
+    }
+    if (block) {
+      return res.json({
+        user: {
+          id: user.id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          avatarUrl: user.avatarUrl,
+        },
+        stats: { followerCount: 0, followingCount: 0, postCount: 0, activityCount: 0 },
+        isFollowing: false,
+        blockedByMe: true,
+      });
+    }
   }
 
   // The workout count follows the same rule as the workouts themselves. It
@@ -42,6 +73,7 @@ async function getUserById(req, res) {
     user: serializeUser(user),
     stats: { followerCount, followingCount, postCount, activityCount },
     isFollowing,
+    blockedByMe: false,
   });
 }
 
@@ -54,7 +86,8 @@ async function searchUsers(req, res) {
     take: limit,
     where: {
       // Never surface the caller to themselves in search or suggestions.
-      id: { not: req.userId },
+      // Nor anyone on either side of a block with them.
+      id: { notIn: [req.userId, ...(await blockedUserIds(req.userId))] },
       // Opting out of discovery keeps someone out of search and suggestions.
       // It does not make the profile private: anyone holding a direct link
       // still sees it, and this endpoint is the only place it applies.
@@ -149,7 +182,7 @@ async function followUser(req, res) {
   }
 
   const target = await prisma.user.findUnique({ where: { id: targetId } });
-  if (!target) {
+  if (!target || (await isBlockedBetween(req.userId, targetId))) {
     throw new AppError(404, 'User not found');
   }
 
@@ -197,7 +230,8 @@ async function getFollowers(req, res) {
     },
   });
 
-  res.json({ followers: followers.map((f) => f.follower) });
+  const blocked = new Set(await blockedUserIds(req.userId));
+  res.json({ followers: followers.map((f) => f.follower).filter((u) => !blocked.has(u.id)) });
 }
 
 async function getFollowing(req, res) {
@@ -218,7 +252,8 @@ async function getFollowing(req, res) {
     },
   });
 
-  res.json({ following: following.map((f) => f.following) });
+  const blocked = new Set(await blockedUserIds(req.userId));
+  res.json({ following: following.map((f) => f.following).filter((u) => !blocked.has(u.id)) });
 }
 
 /**

@@ -121,6 +121,10 @@ if (!r2.enabled && nodeEnv === 'production') {
 const mail = {
   from: process.env.MAIL_FROM || 'Fitrybe <no-reply@fitrybe.app>',
 
+  // Where reported posts are sent for review. Unset means reports are stored
+  // but nobody is emailed, which the server logs each time.
+  reportsTo: process.env.REPORTS_EMAIL || '',
+
   // Preferred. An HTTPS call to the provider on port 443, which no host blocks.
   resendApiKey: process.env.RESEND_API_KEY || '',
 

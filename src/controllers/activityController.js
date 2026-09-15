@@ -5,6 +5,7 @@ const {
   profileActivitiesVisible,
   canViewActivity,
 } = require('../utils/visibility');
+const { isBlockedBetween } = require('../utils/blocks');
 
 async function logActivity(req, res) {
   const {
@@ -119,6 +120,10 @@ async function listActivities(req, res) {
   const targetUserId = userId || req.userId;
   const isSelf = targetUserId === req.userId;
 
+  if (!isSelf && (await isBlockedBetween(req.userId, targetUserId))) {
+    return res.json({ activities: [], nextCursor: null });
+  }
+
   const whereClause = {
     userId: targetUserId,
     // Someone else's list holds only what they let others see, which takes
@@ -161,7 +166,10 @@ async function getActivity(req, res) {
 
   // Don't confirm that a hidden activity exists to anyone but its owner,
   // whether it is hidden on its own or because its owner hid their profile.
-  if (!(await canViewActivity(req.userId, activity))) {
+  if (
+    !(await canViewActivity(req.userId, activity)) ||
+    (await isBlockedBetween(req.userId, activity.userId))
+  ) {
     throw new AppError(404, 'Activity not found');
   }
 
@@ -191,7 +199,11 @@ async function getAnalytics(req, res) {
   // from their public workouts, and from nothing at all if they hid their
   // profile, in which case every query below matches no rows and the reply
   // has the same zeroed shape as a brand new account's.
-  const hidden = !isSelf && !(await profileActivitiesVisible(targetUserId));
+  // A block either way hides them just the same.
+  const hidden =
+    !isSelf &&
+    (!(await profileActivitiesVisible(targetUserId)) ||
+      (await isBlockedBetween(req.userId, targetUserId)));
   const scope = {
     userId: targetUserId,
     ...(isSelf ? {} : { isPublic: true }),

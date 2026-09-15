@@ -2,7 +2,9 @@ const prisma = require('../config/prisma');
 const AppError = require('../utils/AppError');
 const { deleteByUrls } = require('../services/storage');
 const { createNotification } = require('../utils/notify');
-const { postVisibilityFilter, canViewPost } = require('../utils/visibility');
+const { postVisibilityFilter } = require('../utils/visibility');
+const { blockedUserIds, canSeePost } = require('../utils/blocks');
+const moderation = require('../services/moderation');
 const { serializeActivitySummary } = require('../utils/serializers');
 
 const POST_INCLUDE = {
@@ -40,7 +42,7 @@ function serializeComment(comment, viewerId) {
   };
 }
 
-function commentInclude(viewerId, withReplies) {
+function commentInclude(viewerId, withReplies, blockedIds = []) {
   return {
     author: COMMENT_AUTHOR,
     _count: { select: { likes: true, replies: true } },
@@ -48,6 +50,7 @@ function commentInclude(viewerId, withReplies) {
     ...(withReplies
       ? {
           replies: {
+            where: { authorId: { notIn: blockedIds } },
             orderBy: { createdAt: 'asc' },
             include: {
               author: COMMENT_AUTHOR,
@@ -97,6 +100,8 @@ async function listFeed(req, res) {
       await postVisibilityFilter(req.userId),
       // Posts this person chose to hide stay hidden in every feed.
       { hiddenBy: { none: { userId: req.userId } } },
+      // Nothing from anyone on the other side of a block.
+      { authorId: { notIn: await blockedUserIds(req.userId) } },
       {
         ...(targetAuthor ? { authorId: targetAuthor } : {}),
         ...(type ? { type } : {}),
@@ -162,7 +167,7 @@ async function getPost(req, res) {
     },
   });
   // Don't reveal that a Trybes-only post exists to someone outside its Trybes.
-  if (!post || !(await canViewPost(req.userId, post))) {
+  if (!post || !(await canSeePost(req.userId, post))) {
     throw new AppError(404, 'Post not found');
   }
   res.json({ post: serializePost(post, req.userId) });
@@ -216,7 +221,7 @@ async function deletePost(req, res) {
 
 async function likePost(req, res) {
   const post = await prisma.post.findUnique({ where: { id: req.params.postId } });
-  if (!post || !(await canViewPost(req.userId, post))) {
+  if (!post || !(await canSeePost(req.userId, post))) {
     throw new AppError(404, 'Post not found');
   }
 
@@ -250,16 +255,17 @@ async function unlikePost(req, res) {
 
 async function listComments(req, res) {
   const post = await prisma.post.findUnique({ where: { id: req.params.postId } });
-  if (!post || !(await canViewPost(req.userId, post))) {
+  if (!post || !(await canSeePost(req.userId, post))) {
     throw new AppError(404, 'Post not found');
   }
 
   // Only top-level comments are listed; each carries its own replies, so a
   // reply never appears twice.
+  const blocked = await blockedUserIds(req.userId);
   const comments = await prisma.comment.findMany({
-    where: { postId: req.params.postId, parentId: null },
+    where: { postId: req.params.postId, parentId: null, authorId: { notIn: blocked } },
     orderBy: { createdAt: 'asc' },
-    include: commentInclude(req.userId, true),
+    include: commentInclude(req.userId, true, blocked),
   });
 
   res.json({ comments: comments.map((c) => serializeComment(c, req.userId)) });
@@ -267,7 +273,7 @@ async function listComments(req, res) {
 
 async function createComment(req, res) {
   const post = await prisma.post.findUnique({ where: { id: req.params.postId } });
-  if (!post || !(await canViewPost(req.userId, post))) {
+  if (!post || !(await canSeePost(req.userId, post))) {
     throw new AppError(404, 'Post not found');
   }
 
@@ -326,7 +332,7 @@ async function likeComment(req, res) {
     ? await prisma.post.findUnique({ where: { id: comment.postId } })
     : null;
   if (!comment || comment.postId !== req.params.postId || !post ||
-      !(await canViewPost(req.userId, post))) {
+      !(await canSeePost(req.userId, post))) {
     throw new AppError(404, 'Comment not found');
   }
 
@@ -376,7 +382,7 @@ async function unlikeComment(req, res) {
  */
 async function reportPost(req, res) {
   const post = await prisma.post.findUnique({ where: { id: req.params.postId } });
-  if (!post || !(await canViewPost(req.userId, post))) {
+  if (!post || !(await canSeePost(req.userId, post))) {
     throw new AppError(404, 'Post not found');
   }
   if (post.authorId === req.userId) {
@@ -397,13 +403,18 @@ async function reportPost(req, res) {
     }),
   ]);
 
+  // Not awaited: the report is stored whether or not the email goes out.
+  moderation
+    .alertPostReported({ post, reporterId: req.userId, reason, details })
+    .catch((err) => console.error(`[fitrybe] Could not email report for post ${post.id}:`, err.message));
+
   res.status(201).json({ reported: true, hidden: true });
 }
 
 /** Hides a post from the caller's feeds only. Hiding twice stays one row. */
 async function hidePost(req, res) {
   const post = await prisma.post.findUnique({ where: { id: req.params.postId } });
-  if (!post || !(await canViewPost(req.userId, post))) {
+  if (!post || !(await canSeePost(req.userId, post))) {
     throw new AppError(404, 'Post not found');
   }
   await prisma.hiddenPost.upsert({

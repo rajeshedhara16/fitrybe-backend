@@ -2,6 +2,9 @@ const prisma = require('../config/prisma');
 const AppError = require('../utils/AppError');
 const { emitToConversation } = require('../sockets');
 const { deleteByUrls } = require('../services/storage');
+const { isBlockedBetween } = require('../utils/blocks');
+
+const BLOCKED_MESSAGE = "You can't message this person.";
 
 const SENDER_SELECT = {
   select: { id: true, firstName: true, lastName: true, avatarUrl: true },
@@ -132,6 +135,9 @@ async function createConversation(req, res) {
     if (!recipient) {
       throw new AppError(404, 'User not found');
     }
+    if (await isBlockedBetween(req.userId, recipientId)) {
+      throw new AppError(403, BLOCKED_MESSAGE);
+    }
 
     // Check if direct conversation already exists
     const existing = await prisma.conversation.findFirst({
@@ -238,6 +244,16 @@ async function sendMessage(req, res) {
 
   if (!membership) {
     throw new AppError(403, 'You are not a member of this conversation');
+  }
+
+  // In a one-to-one chat, a block on either side stops new messages. Group and
+  // Trybe chats carry on; leaving is the way out of those.
+  const other = await prisma.conversationMember.findFirst({
+    where: { conversationId, userId: { not: req.userId }, conversation: { type: 'DIRECT' } },
+    select: { userId: true },
+  });
+  if (other && (await isBlockedBetween(req.userId, other.userId))) {
+    throw new AppError(403, BLOCKED_MESSAGE);
   }
 
   // A reply may only quote a message from this same conversation, or it would
