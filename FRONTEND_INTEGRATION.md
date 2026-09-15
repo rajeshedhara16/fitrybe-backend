@@ -433,33 +433,86 @@ knows the athlete's timezone. A run at 1am belongs to that day where they live.
   }
   ```
 
+Every Trybe in a response also carries the caller's standing:
+`myRole` (`CREATOR`, `CAPTAIN`, `MEMBER` or null), `canManage` (creator or
+captain), `notificationsMuted`, and `weeklyGoalKm` (null when no goal is set).
+A private Trybe answers 404 to anyone who is not a member.
+
 #### 2. Create Trybe
 - **Method & Path**: `POST /api/trybes` (`multipart/form-data`)
-- **Fields**: `name`, `description`, `category`, `location`, `image`
+- **Fields**: `name`, `description`, `category`, `location`, `isPublic`,
+  `activityInterests` (comma-separated), `weeklyGoalKm`, `image`
 
-#### 3. Trybe Leaderboard (Distance Ranking)
-- **Method & Path**: `GET /api/trybes/:trybeId/leaderboard`
+#### 3. Edit / Delete Trybe
+- **Edit**: `PATCH /api/trybes/:trybeId` (`multipart/form-data`), creator and
+  captains. Send only the fields that change. `weeklyGoalKm: ""` clears the
+  goal, `removeImage: "true"` clears the photo. Only the creator may send
+  `isPublic` (403 otherwise).
+- **Delete**: `DELETE /api/trybes/:trybeId`, creator only. Removes its events,
+  invites and event notifications.
+
+#### 4. Trybe Leaderboard (Distance Ranking)
+- **Method & Path**: `GET /api/trybes/:trybeId/leaderboard?since=<ISO date>`
+- `since` is the start of the athlete's own week or month, computed in their
+  timezone by the app. Omit it for all time. `totalDistanceKm` is the whole
+  Trybe's distance over the same span and drives the weekly goal.
 - **Response**:
   ```json
   {
     "leaderboard": [
       { "rank": 1, "userId": "u-1", "name": "Marcus Chen", "stat": "84.2 km", "distanceKm": 84.2 },
-      { "rank": 2, "userId": "u-2", "name": "Elena Forge", "stat": "76.5 km", "distanceKm": 76.5 },
-      { "rank": 3, "userId": "u-3", "name": "Alex Rivera", "stat": "68.1 km", "distanceKm": 68.1 }
-    ]
+      { "rank": 2, "userId": "u-2", "name": "Elena Forge", "stat": "76.5 km", "distanceKm": 76.5 }
+    ],
+    "totalDistanceKm": 160.7
   }
   ```
 
-#### 4. Trybe Posts Feed
-- **Method & Path**: `GET /api/trybes/:trybeId/posts`
-- Posts by this Trybe's members, serialized exactly like the main feed —
-  `likeCount`, `commentCount`, `likedByMe` and a trimmed `activity`. A card here
-  reads the same keys it reads anywhere else, so a post opened from a Trybe
-  shows the same numbers as one opened from the feed.
+#### 5. Trybe Posts Feed
+- **One Trybe**: `GET /api/trybes/:trybeId/posts`
+- **All my Trybes**: `GET /api/trybes/feed?cursor=&limit=20`, posts from
+  everyone in every Trybe the caller belongs to.
+- Posts are serialized exactly like the main feed — `likeCount`,
+  `commentCount`, `likedByMe` and a trimmed `activity`. Posts the caller hid or
+  reported are left out here and in the main feed.
 
-#### 5. Join / Leave Trybe
-- **Join**: `POST /api/trybes/:trybeId/join`
-- **Leave**: `DELETE /api/trybes/:trybeId/join`
+#### 6. Join / Leave Trybe
+- **Join**: `POST /api/trybes/:trybeId/join` (a private Trybe needs a pending invite)
+- **Leave**: `DELETE /api/trybes/:trybeId/join` (the creator cannot leave; 400)
+
+#### 7. Members, Roles and Muting
+- **List**: `GET /api/trybes/:trybeId/members`, creator first, then captains.
+  Each row has `role`, `user` and `isFollowing` (whether the caller follows them).
+- **Role**: `PATCH /api/trybes/:trybeId/members/:userId/role` with
+  `{ "role": "CAPTAIN" | "MEMBER" }`, creator only.
+- **Remove**: `DELETE /api/trybes/:trybeId/members/:userId`. The creator can
+  remove anyone; a captain can remove members but not other captains. Nobody
+  can remove the creator. Also takes them out of the Trybe chat and RSVPs.
+- **Mute**: `PUT /api/trybes/:trybeId/mute` with `{ "muted": true }`. A muted
+  member gets no `TRYBE_EVENT` notifications.
+- **Invite**: `POST /api/trybes/:trybeId/invite` with `{ "userId" }`, any
+  member. Answers `{ invited: true }`, `{ alreadyInvited: true }` or
+  `{ alreadyMember: true }`; a second invite is never sent.
+
+#### 8. Events
+- **List**: `GET /api/trybes/:trybeId/events?when=upcoming|past`. Upcoming is
+  soonest first; an event without `endsAt` counts as upcoming until two hours
+  after it starts.
+- **Create**: `POST /api/trybes/:trybeId/events`, creator and captains.
+  `{ title, description?, location?, activityType?, startsAt, endsAt? }`. The
+  organiser is marked going and members get a `TRYBE_EVENT` notification whose
+  `entityId` is the Trybe.
+- **Edit / Cancel**: `PATCH` / `DELETE /api/trybes/:trybeId/events/:eventId`,
+  the organiser, creator or captains. `endsAt: null` removes the end time.
+- **RSVP**: `POST` / `DELETE /api/trybes/:trybeId/events/:eventId/rsvp`,
+  members only, not for past events. Answers `{ going, goingCount }`.
+- Each event carries `goingCount`, `goingByMe`, up to five `attendees`,
+  `creator`, `isPast` and `canManage`.
+
+#### 9. Hide / Report a Post
+- **Hide**: `POST /api/posts/:postId/hide`, undo with `DELETE`.
+- **Report**: `POST /api/posts/:postId/report` with
+  `{ reason: SPAM | HARASSMENT | INAPPROPRIATE | MISINFORMATION | OTHER, details? }`.
+  Reporting also hides the post for the reporter. Reporting your own post is 400.
 
 ---
 

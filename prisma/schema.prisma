@@ -73,6 +73,8 @@ enum NotificationType {
   CLIQUE_INVITE
   MESSAGE
   SYSTEM
+  /// Something scheduled in a Trybe you belong to. Silenced per Trybe by muting.
+  TRYBE_EVENT
 }
 
 model User {
@@ -145,6 +147,75 @@ model User {
   subscription           Subscription?
   identities             AuthIdentity[]
   passwordResets         PasswordReset[]
+  postReports            PostReport[]
+  hiddenPosts            HiddenPost[]
+  trybeEventsCreated     TrybeEvent[]         @relation("TrybeEventCreator")
+  trybeEventRsvps        TrybeEventRsvp[]
+}
+
+/// A member's report that a post breaks the rules. One per person per post, so
+/// reporting twice updates the reason rather than stacking up.
+model PostReport {
+  id         String   @id @default(uuid())
+  post       Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId     String
+  reporter   User     @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+  reporterId String
+  reason     String
+  details    String?
+  createdAt  DateTime @default(now())
+
+  @@unique([postId, reporterId])
+  @@index([createdAt])
+}
+
+/// A post one person chose not to see again. Filtered out of every feed for
+/// them and nobody else.
+model HiddenPost {
+  id        String   @id @default(uuid())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId    String
+  createdAt DateTime @default(now())
+
+  @@unique([userId, postId])
+  @@index([userId])
+}
+
+/// Something a Trybe plans to do together, such as a Sunday long run.
+model TrybeEvent {
+  id           String    @id @default(uuid())
+  trybe        Trybe     @relation(fields: [trybeId], references: [id], onDelete: Cascade)
+  trybeId      String
+  /// Null if the organiser deletes their account, so the event survives.
+  creator      User?     @relation("TrybeEventCreator", fields: [creatorId], references: [id], onDelete: SetNull)
+  creatorId    String?
+  title        String
+  description  String?
+  location     String?
+  activityType String?
+  startsAt     DateTime
+  endsAt       DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  rsvps TrybeEventRsvp[]
+
+  @@index([trybeId, startsAt])
+}
+
+/// A member saying they are going. Not going is the absence of a row.
+model TrybeEventRsvp {
+  id        String     @id @default(uuid())
+  event     TrybeEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  eventId   String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  createdAt DateTime   @default(now())
+
+  @@unique([eventId, userId])
+  @@index([userId])
 }
 
 /// One way of signing in to an account.
@@ -268,6 +339,8 @@ model Post {
 
   likes    Like[]
   comments Comment[]
+  reports  PostReport[]
+  hiddenBy HiddenPost[]
 
   @@index([authorId])
   @@index([createdAt])
@@ -331,8 +404,14 @@ model Trybe {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
+  /// Distance in kilometres the members aim to cover together each week.
+  /// Null means nobody has set one, and the app shows no goal at all rather
+  /// than inventing a target.
+  weeklyGoalKm Float?
+
   members       TrybeMember[]
   conversations Conversation[]
+  events        TrybeEvent[]
 
   @@index([creatorId])
 }
@@ -345,6 +424,9 @@ model TrybeMember {
   userId   String
   role     TrybeRole @default(MEMBER)
   joinedAt DateTime  @default(now())
+
+  /// Silences this Trybe's notifications, such as new events, for this member.
+  notificationsMuted Boolean @default(false)
 
   @@unique([trybeId, userId])
   @@index([userId])

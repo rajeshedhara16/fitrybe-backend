@@ -95,6 +95,8 @@ async function listFeed(req, res) {
   const whereClause = {
     AND: [
       await postVisibilityFilter(req.userId),
+      // Posts this person chose to hide stay hidden in every feed.
+      { hiddenBy: { none: { userId: req.userId } } },
       {
         ...(targetAuthor ? { authorId: targetAuthor } : {}),
         ...(type ? { type } : {}),
@@ -365,7 +367,64 @@ async function unlikeComment(req, res) {
   res.json({ liked: false, likeCount });
 }
 
+/**
+ * Records that a post breaks the rules, and hides it from the reporter.
+ *
+ * Reporting twice updates the reason instead of filing a second report, so one
+ * person cannot pile reports onto a post. Hidden at the same time because
+ * nobody who reported a post wants to keep scrolling past it.
+ */
+async function reportPost(req, res) {
+  const post = await prisma.post.findUnique({ where: { id: req.params.postId } });
+  if (!post || !(await canViewPost(req.userId, post))) {
+    throw new AppError(404, 'Post not found');
+  }
+  if (post.authorId === req.userId) {
+    throw new AppError(400, 'You cannot report your own post');
+  }
+
+  const { reason, details } = req.body;
+  await prisma.$transaction([
+    prisma.postReport.upsert({
+      where: { postId_reporterId: { postId: post.id, reporterId: req.userId } },
+      create: { postId: post.id, reporterId: req.userId, reason, details },
+      update: { reason, details: details ?? null },
+    }),
+    prisma.hiddenPost.upsert({
+      where: { userId_postId: { userId: req.userId, postId: post.id } },
+      create: { userId: req.userId, postId: post.id },
+      update: {},
+    }),
+  ]);
+
+  res.status(201).json({ reported: true, hidden: true });
+}
+
+/** Hides a post from the caller's feeds only. Hiding twice stays one row. */
+async function hidePost(req, res) {
+  const post = await prisma.post.findUnique({ where: { id: req.params.postId } });
+  if (!post || !(await canViewPost(req.userId, post))) {
+    throw new AppError(404, 'Post not found');
+  }
+  await prisma.hiddenPost.upsert({
+    where: { userId_postId: { userId: req.userId, postId: post.id } },
+    create: { userId: req.userId, postId: post.id },
+    update: {},
+  });
+  res.status(201).json({ hidden: true });
+}
+
+async function unhidePost(req, res) {
+  await prisma.hiddenPost.deleteMany({
+    where: { userId: req.userId, postId: req.params.postId },
+  });
+  res.json({ hidden: false });
+}
+
 module.exports = {
+  reportPost,
+  hidePost,
+  unhidePost,
   // Shared so every surface that returns a post — the feed, a single post, a
   // Trybe's posts — hands the client the same shape. A card that has to guess
   // between `_count.likes` and `likeCount` gets one of them wrong.

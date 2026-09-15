@@ -7,6 +7,7 @@ const {
   updatePostSchema,
   createCommentSchema,
   paginationSchema,
+  reportPostSchema,
 } = require('../validators/postValidators');
 const { makeUploader } = require('../middleware/upload');
 
@@ -28,6 +29,10 @@ router.delete('/:postId', postController.deletePost);
 
 router.post('/:postId/like', postController.likePost);
 router.delete('/:postId/like', postController.unlikePost);
+
+router.post('/:postId/report', validateBody(reportPostSchema), postController.reportPost);
+router.post('/:postId/hide', postController.hidePost);
+router.delete('/:postId/hide', postController.unhidePost);
 
 router.get('/:postId/comments', postController.listComments);
 router.post('/:postId/comments', validateBody(createCommentSchema), postController.createComment);

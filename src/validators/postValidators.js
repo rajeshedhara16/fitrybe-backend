@@ -35,10 +35,16 @@ const listPostsQuerySchema = z.object({
 
 const paginationSchema = listPostsQuerySchema;
 
+const reportPostSchema = z.object({
+  reason: z.enum(['SPAM', 'HARASSMENT', 'INAPPROPRIATE', 'MISINFORMATION', 'OTHER']),
+  details: z.string().trim().max(500).optional(),
+});
+
 module.exports = {
   createPostSchema,
   updatePostSchema,
   createCommentSchema,
   listPostsQuerySchema,
   paginationSchema,
+  reportPostSchema,
 };
