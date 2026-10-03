@@ -22,11 +22,37 @@ const logActivitySchema = z.object({
   cliqueSessionId: z.string().uuid().optional(),
 });
 
+/**
+ * One workout read out of Apple Health or Health Connect.
+ *
+ * `externalId` is the health store's own id for it, which is what makes a
+ * repeated import land on the same row instead of a second copy. `startTime`
+ * is required: an imported workout is filed on the day it happened, not the
+ * day it was imported.
+ */
+const importedActivitySchema = z.object({
+  externalId: z.string().trim().min(1).max(200),
+  title: z.string().trim().min(1).max(100),
+  type: z.string().trim().min(1).max(40).default('Workout'),
+  duration: z.number().int().min(1),
+  distance: z.number().min(0).default(0),
+  calories: z.number().int().min(0).default(0),
+  elevationGain: z.number().min(0).optional(),
+  startTime: z.coerce.date(),
+  endTime: z.coerce.date().optional(),
+  sourceName: z.string().trim().max(120).optional(),
+  isPublic: z.boolean().optional(),
+});
+
+const importActivitiesSchema = z.object({
+  activities: z.array(importedActivitySchema).min(1).max(200),
+});
+
 const listActivitiesQuerySchema = z.object({
   userId: z.string().uuid().optional(),
   type: z.string().trim().optional(),
   // Narrows to where workouts were recorded; absent returns both.
-  source: z.enum(['RECORDED', 'CLIQUE']).optional(),
+  source: z.enum(['RECORDED', 'CLIQUE', 'HEALTH']).optional(),
   cursor: z.string().uuid().optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
 });
@@ -39,6 +65,7 @@ const analyticsQuerySchema = z.object({
 
 module.exports = {
   logActivitySchema,
+  importActivitiesSchema,
   listActivitiesQuerySchema,
   analyticsQuerySchema,
 };

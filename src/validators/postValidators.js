@@ -10,6 +10,8 @@ const createPostSchema = z.object({
   audience: z.enum(['EVERYONE', 'TRYBES']).optional(),
   locationTag: z.string().trim().max(120).optional(),
   activityId: z.string().uuid().optional(),
+  // Shares the post into one of the author's Trybes, for its members only.
+  trybeId: z.string().uuid().optional(),
 });
 
 // Only the text of a post is editable; images, audience and the linked

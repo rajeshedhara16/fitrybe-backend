@@ -21,14 +21,23 @@ async function postVisibilityFilter(viewerId) {
   const trybeIds = await trybeIdsFor(viewerId);
 
   return {
-    OR: [
-      { audience: 'EVERYONE' },
-      { authorId: viewerId },
+    AND: [
       {
-        audience: 'TRYBES',
-        // An empty `in` matches nothing, which is the right answer for a
-        // viewer who has not joined any Trybe yet.
-        author: { trybeMembers: { some: { trybeId: { in: trybeIds } } } },
+        OR: [
+          { audience: 'EVERYONE' },
+          { authorId: viewerId },
+          {
+            audience: 'TRYBES',
+            // An empty `in` matches nothing, which is the right answer for a
+            // viewer who has not joined any Trybe yet.
+            author: { trybeMembers: { some: { trybeId: { in: trybeIds } } } },
+          },
+        ],
+      },
+      // A post shared into a Trybe is for that Trybe's members only, on top of
+      // its audience.
+      {
+        OR: [{ trybeId: null }, { authorId: viewerId }, { trybeId: { in: trybeIds } }],
       },
     ],
   };
@@ -38,6 +47,13 @@ async function postVisibilityFilter(viewerId) {
 async function canViewPost(viewerId, post) {
   if (!post) return false;
   if (post.authorId === viewerId) return true;
+  if (post.trybeId) {
+    const member = await prisma.trybeMember.findUnique({
+      where: { trybeId_userId: { trybeId: post.trybeId, userId: viewerId } },
+      select: { id: true },
+    });
+    return !!member;
+  }
   if (post.audience !== 'TRYBES') return true;
 
   const shared = await prisma.trybeMember.findFirst({

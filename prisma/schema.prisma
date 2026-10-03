@@ -26,6 +26,7 @@ enum UnitSystem {
 enum ActivitySource {
   RECORDED
   CLIQUE
+  HEALTH
 }
 
 enum PostAudience {
@@ -317,8 +318,17 @@ model Activity {
   cliqueSession   CliqueSession? @relation(fields: [cliqueSessionId], references: [id], onDelete: SetNull)
   cliqueSessionId String?
 
+  /// The workout's id in Apple Health or Health Connect, for workouts imported
+  /// from a watch. Unique per athlete, so importing twice cannot file the same
+  /// session again. Null for anything recorded in the app.
+  externalId String?
+  /// Where an imported workout came from, as the health store names it, such
+  /// as "Garmin Connect" or "Apple Watch".
+  sourceName String?
+
   posts Post[]
 
+  @@unique([userId, externalId])
   @@index([userId])
   @@index([createdAt])
   @@index([userId, source])
@@ -336,6 +346,11 @@ model Post {
   imageUrls   String[]     @default([])
   activity    Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
   activityId  String?
+  /// The Trybe this was shared into. Only that Trybe's members see it, on the
+  /// Trybe and in their feed. If the Trybe is deleted the link goes and the post
+  /// falls back to its audience, which is always TRYBES for these.
+  trybe       Trybe?       @relation(fields: [trybeId], references: [id], onDelete: SetNull)
+  trybeId     String?
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
@@ -346,6 +361,7 @@ model Post {
 
   @@index([authorId])
   @@index([createdAt])
+  @@index([trybeId])
 }
 
 model Like {
@@ -414,6 +430,7 @@ model Trybe {
   members       TrybeMember[]
   conversations Conversation[]
   events        TrybeEvent[]
+  posts         Post[]
 
   @@index([creatorId])
 }

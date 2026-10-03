@@ -111,6 +111,97 @@ async function logActivity(req, res) {
   res.status(201).json({ activity });
 }
 
+/** How close two workouts must start to be treated as the same session. */
+const DUPLICATE_WINDOW_MS = 5 * 60 * 1000;
+
+/**
+ * Files workouts read out of Apple Health or Health Connect.
+ *
+ * Two kinds of duplicate are refused. The same health-store workout arriving
+ * twice is caught by `externalId`. A run recorded in Fitrybe that the watch
+ * also wrote to the health store is caught by its start time: the two are
+ * minutes apart at most, so anything that close to an app-recorded workout is
+ * left alone rather than counted again.
+ *
+ * An imported workout is filed under the time it happened, not the time it was
+ * imported, so a Saturday run synced on Monday still lands on Saturday for
+ * goals, streaks, the calendar and Trybe leaderboards.
+ */
+async function importActivities(req, res) {
+  const { activities } = req.body;
+
+  const earliest = activities.reduce(
+    (min, a) => (a.startTime < min ? a.startTime : min),
+    activities[0].startTime
+  );
+
+  const [alreadyImported, recorded] = await Promise.all([
+    prisma.activity.findMany({
+      where: {
+        userId: req.userId,
+        externalId: { in: activities.map((a) => a.externalId) },
+      },
+      select: { externalId: true },
+    }),
+    prisma.activity.findMany({
+      where: {
+        userId: req.userId,
+        source: { in: ['RECORDED', 'CLIQUE'] },
+        startTime: { gte: new Date(earliest.getTime() - DUPLICATE_WINDOW_MS) },
+      },
+      select: { startTime: true },
+    }),
+  ]);
+
+  const seen = new Set(alreadyImported.map((a) => a.externalId));
+  const recordedStarts = recorded.map((a) => a.startTime.getTime());
+  const rows = [];
+  let duplicates = 0;
+
+  for (const a of activities) {
+    const start = a.startTime.getTime();
+    const clashesWithRecorded = recordedStarts.some(
+      (t) => Math.abs(t - start) <= DUPLICATE_WINDOW_MS
+    );
+    if (seen.has(a.externalId) || clashesWithRecorded) {
+      duplicates++;
+      continue;
+    }
+    seen.add(a.externalId);
+
+    rows.push({
+      userId: req.userId,
+      title: a.title,
+      type: a.type,
+      duration: a.duration,
+      distance: a.distance,
+      calories: a.calories,
+      elevationGain: a.elevationGain ?? 0,
+      avgPace:
+        a.distance > 0
+          ? parseFloat((a.duration / 60 / (a.distance / 1000)).toFixed(2))
+          : null,
+      startTime: a.startTime,
+      endTime: a.endTime || new Date(start + a.duration * 1000),
+      isPublic: a.isPublic ?? true,
+      source: 'HEALTH',
+      externalId: a.externalId,
+      sourceName: a.sourceName || null,
+      createdAt: a.startTime,
+    });
+  }
+
+  if (rows.length > 0) {
+    await prisma.activity.createMany({ data: rows, skipDuplicates: true });
+  }
+
+  res.status(201).json({
+    received: activities.length,
+    imported: rows.length,
+    duplicates,
+  });
+}
+
 async function listActivities(req, res) {
   const { userId, type, source, cursor, limit } = req.validatedQuery;
 
@@ -320,6 +411,7 @@ async function deleteActivity(req, res) {
 
 module.exports = {
   logActivity,
+  importActivities,
   listActivities,
   getActivity,
   getAnalytics,

@@ -14,6 +14,8 @@ const POST_INCLUDE = {
     select: { id: true, firstName: true, lastName: true, avatarUrl: true, activitiesVisible: true },
   },
   activity: true,
+  // Which Trybe a post was shared into, so a card can say so.
+  trybe: { select: { id: true, name: true } },
   _count: { select: { likes: true, comments: true } },
 };
 
@@ -135,8 +137,23 @@ async function createPost(req, res) {
     throw new AppError(400, 'Add a caption or at least one photo to post');
   }
 
-  // Only when the composer said nothing. Picking an audience there always wins.
-  let audience = req.body.audience;
+  const { trybeId } = req.body;
+  if (trybeId) {
+    const membership = await prisma.trybeMember.findUnique({
+      where: { trybeId_userId: { trybeId, userId: req.userId } },
+      select: { id: true },
+    });
+    if (!membership) {
+      // The photos were already stored by the upload step; nothing will
+      // reference them now.
+      await deleteByUrls(imageUrls);
+      throw new AppError(403, 'Join this Trybe before posting in it');
+    }
+  }
+
+  // A Trybe post is always Trybes-only. Otherwise it is whatever the composer
+  // picked, and the athlete's default only when the composer said nothing.
+  let audience = trybeId ? 'TRYBES' : req.body.audience;
   if (audience === undefined) {
     const author = await prisma.user.findUnique({
       where: { id: req.userId },

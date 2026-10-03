@@ -428,21 +428,15 @@ async function getTrybePosts(req, res) {
   const ctx = await loadTrybe(trybeId, req.userId);
   const isMember = !!ctx.role;
 
-  const trybeMembers = await prisma.trybeMember.findMany({
-    where: { trybeId },
-    select: { userId: true },
-  });
-
   const posts = await prisma.post.findMany({
-    // Members share this Trybe with every author here, so Trybes-only posts
-    // are visible to them; an onlooker browsing a public Trybe is not, and
-    // the shared visibility filter keeps those posts out of their view.
+    // Only what was shared into this Trybe, and only for its members. Someone
+    // browsing a public Trybe from outside sees no posts.
     where: {
       AND: [
-        { authorId: { in: trybeMembers.map((m) => m.userId) } },
+        { trybeId },
+        isMember ? {} : { id: { in: [] } },
         { authorId: { notIn: await blockedUserIds(req.userId) } },
         { hiddenBy: { none: { userId: req.userId } } },
-        isMember ? {} : await postVisibilityFilter(req.userId),
       ],
     },
     orderBy: { createdAt: 'desc' },
@@ -457,11 +451,10 @@ async function getTrybePosts(req, res) {
 }
 
 /**
- * Posts from everyone in every Trybe the caller belongs to, newest first. The
- * Trybes tab used to show only the first Trybe joined.
+ * Posts shared into any Trybe the caller belongs to, newest first.
  *
- * No audience filter is needed: every author here shares a Trybe with the
- * caller, which is exactly who a Trybes-only post is for.
+ * No audience filter is needed: the caller is a member of every Trybe these
+ * were shared into, which is exactly who they are for.
  */
 async function listMyTrybesFeed(req, res) {
   const { cursor, limit } = req.validatedQuery;
@@ -474,18 +467,12 @@ async function listMyTrybesFeed(req, res) {
     return res.json({ posts: [], nextCursor: null });
   }
 
-  const authors = await prisma.trybeMember.findMany({
-    where: { trybeId: { in: memberships.map((m) => m.trybeId) } },
-    select: { userId: true },
-    distinct: ['userId'],
-  });
-
-  const blocked = new Set(await blockedUserIds(req.userId));
   const posts = await prisma.post.findMany({
     take: limit,
     ...(cursor && { skip: 1, cursor: { id: cursor } }),
     where: {
-      authorId: { in: authors.map((a) => a.userId).filter((id) => !blocked.has(id)) },
+      trybeId: { in: memberships.map((m) => m.trybeId) },
+      authorId: { notIn: await blockedUserIds(req.userId) },
       hiddenBy: { none: { userId: req.userId } },
     },
     orderBy: { createdAt: 'desc' },
