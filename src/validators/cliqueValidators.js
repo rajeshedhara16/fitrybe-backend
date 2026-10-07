@@ -7,6 +7,7 @@ const createCliqueSchema = z.object({
   scheduledAt: z.coerce.date().optional(),
   targetDistance: z.number().positive().optional(),
   targetDuration: z.number().int().positive().optional(),
+  targetCalories: z.number().int().positive().optional(),
   meetingLocation: z.string().trim().max(200).optional(),
   routeData: z.any().optional(),
 });

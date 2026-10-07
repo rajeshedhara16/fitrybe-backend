@@ -511,6 +511,9 @@ model CliqueSession {
   endedAt         DateTime?
   targetDistance  Float?
   targetDuration  Int?
+  /// Kilocalories the squad is aiming at. Only one of the three targets is set
+  /// on a session; the app shows whichever it finds.
+  targetCalories  Int?
   meetingLocation String?
   routeData       Json?
   createdAt       DateTime     @default(now())
