@@ -231,6 +231,72 @@ async function setReady(req, res) {
 }
 
 /**
+ * Ends the caller's own leg of a session and records what they covered.
+ *
+ * Everyone finishes separately: the host pressing stop does not cut anyone
+ * else's run short, and one athlete finishing leaves the rest running. The
+ * final figures are written to their participant row so the leaderboard shows
+ * a settled number rather than their last telemetry ping, and the whole roster
+ * is broadcast so every device agrees on who is still out there.
+ *
+ * The session itself closes only when nobody is left running.
+ */
+async function finishParticipation(req, res) {
+  const { distance = 0, duration = 0, calories = 0, pace } = req.body;
+
+  const session = await prisma.cliqueSession.findUnique({
+    where: { id: req.params.sessionId },
+  });
+  if (!session) {
+    throw new AppError(404, 'Clique session not found');
+  }
+
+  const participant = await prisma.cliqueParticipant.findUnique({
+    where: { sessionId_userId: { sessionId: session.id, userId: req.userId } },
+  });
+  if (!participant || participant.status === 'INVITED') {
+    throw new AppError(403, 'You are not taking part in this activity');
+  }
+
+  const kmPerHour = duration > 0 ? distance / 1000 / (duration / 3600) : 0;
+  await prisma.cliqueParticipant.update({
+    where: { id: participant.id },
+    data: {
+      status: 'COMPLETED',
+      isReady: false,
+      currentDistance: distance,
+      currentPace: pace ?? (kmPerHour > 0 ? 60 / kmPerHour : null),
+    },
+  });
+
+  // With nobody still running, the session is over.
+  const stillRunning = await prisma.cliqueParticipant.count({
+    where: { sessionId: session.id, status: 'ACTIVE' },
+  });
+  let closed = false;
+  if (stillRunning === 0 && session.status === 'LIVE') {
+    await prisma.cliqueSession.update({
+      where: { id: session.id },
+      data: { status: 'COMPLETED', endedAt: session.endedAt || new Date() },
+    });
+    emitToClique(session.id, 'clique:status_updated', {
+      sessionId: session.id,
+      status: 'COMPLETED',
+    });
+    closed = true;
+  }
+
+  const updated = await broadcastSession(session.id);
+
+  res.json({
+    finished: true,
+    sessionClosed: closed,
+    calories,
+    session: updated ? serialise(updated) : null,
+  });
+}
+
+/**
  * Host-only lifecycle control. Starting the activity is deliberately not
  * blocked on everyone being ready — the client warns instead — so one idle
  * member cannot hold up the squad.
@@ -393,5 +459,6 @@ module.exports = {
   leaveClique,
   setReady,
   updateStatus,
+  finishParticipation,
   inviteToClique,
 };
