@@ -168,6 +168,7 @@ function persistTelemetry(socket, sessionId, data) {
         currentLng: num(data.lng),
         currentDistance: num(data.distance),
         currentPace: num(data.pace),
+        currentCalories: num(data.calories),
       },
     })
     // A dropped telemetry write must never take the socket down; the next

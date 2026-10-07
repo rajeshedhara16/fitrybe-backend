@@ -541,6 +541,10 @@ model CliqueParticipant {
   currentLng      Float?
   currentDistance Float?
   currentPace     Float?
+  /// Filled in when this athlete finishes their leg, so a completed session
+  /// still shows what each person did rather than a row of zeroes.
+  currentDuration Int?
+  currentCalories Int?
   joinedAt        DateTime          @default(now())
 
   @@unique([sessionId, userId])

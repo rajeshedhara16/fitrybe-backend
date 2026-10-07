@@ -265,6 +265,8 @@ async function finishParticipation(req, res) {
       status: 'COMPLETED',
       isReady: false,
       currentDistance: distance,
+      currentDuration: duration,
+      currentCalories: calories,
       currentPace: pace ?? (kmPerHour > 0 ? 60 / kmPerHour : null),
     },
   });
