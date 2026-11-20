@@ -26,6 +26,12 @@ const finishSchema = z.object({
   duration: z.coerce.number().int().min(0).default(0),
   calories: z.coerce.number().int().min(0).default(0),
   pace: z.coerce.number().min(0).optional(),
+  // Set when the session's own goal was met, which ends it for everyone
+  // rather than only for the athlete who got there first.
+  endSession: z
+    .union([z.boolean(), z.string()])
+    .optional()
+    .transform((v) => v === true || v === 'true'),
 });
 
 const readySchema = z.object({

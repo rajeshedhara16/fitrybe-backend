@@ -56,6 +56,7 @@ async function createClique(req, res) {
     scheduledAt,
     targetDistance,
     targetDuration,
+    targetCalories,
     meetingLocation,
     routeData,
   } = req.body;
@@ -69,6 +70,7 @@ async function createClique(req, res) {
       scheduledAt: scheduledAt || new Date(),
       targetDistance,
       targetDuration,
+      targetCalories,
       meetingLocation,
       routeData,
       participants: {
@@ -242,7 +244,7 @@ async function setReady(req, res) {
  * The session itself closes only when nobody is left running.
  */
 async function finishParticipation(req, res) {
-  const { distance = 0, duration = 0, calories = 0, pace } = req.body;
+  const { distance = 0, duration = 0, calories = 0, pace, endSession = false } = req.body;
 
   const session = await prisma.cliqueSession.findUnique({
     where: { id: req.params.sessionId },
@@ -271,12 +273,15 @@ async function finishParticipation(req, res) {
     },
   });
 
-  // With nobody still running, the session is over.
+  // The session is over when its goal has been met, or when nobody is left
+  // running. A goal belongs to the whole squad, so the first athlete to reach
+  // it ends the activity for everyone; each of them still saves their own
+  // workout with their own figures.
   const stillRunning = await prisma.cliqueParticipant.count({
     where: { sessionId: session.id, status: 'ACTIVE' },
   });
   let closed = false;
-  if (stillRunning === 0 && session.status === 'LIVE') {
+  if ((endSession || stillRunning === 0) && session.status === 'LIVE') {
     await prisma.cliqueSession.update({
       where: { id: session.id },
       data: { status: 'COMPLETED', endedAt: session.endedAt || new Date() },
